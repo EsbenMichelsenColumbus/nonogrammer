@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nonogram solver tests</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 16px; background: #fff; color: #222; }
+  .pass { color: #1a7f37; } .fail { color: #c62828; font-weight: 600; }
+  table { border-collapse: collapse; margin-top: 12px; }
+  td, th { border: 1px solid #ccc; padding: 4px 8px; text-align: left; }
+  pre { background: #f5f5f5; padding: 8px; }
+</style>
+</head>
+<body>
+<h1>Nonogram solver tests</h1>
+<p>Runs unit tests for the line techniques, then checks every built-in puzzle has exactly one solution and can be solved without guessing.</p>
+<div id="unit"></div>
+<div id="puzzles">Checking puzzles…</div>
+<pre id="summary"></pre>
+<script src="js/solver.js"></script>
+<script src="js/hints.js"></script>
+<script src="js/puzzles.js"></script>
+<script>
+(function () {
+  const S = NonogramSolver;
+  const results = [];
+  function parse(s) { return Array.from(s, ch => ch === '#' ? S.FILLED : ch === 'x' ? S.EMPTY : S.UNKNOWN); }
+  function show(line) { return line.map(v => v === S.FILLED ? '#' : v === S.EMPTY ? 'x' : '.').join(''); }
+  function apply(line, cells) { const l = line.slice(); cells.forEach(({ i, v }) => l[i] = v); return l; }
+  function check(name, cond, info) { results.push({ name, ok: !!cond, info }); }
+
+  function techTest(tech, clues, lineStr, expected) {
+    const line = parse(lineStr);
+    const a = S.analyzeLine(clues, line);
+    const res = S.lineTechniques[tech](clues, line, a);
+    const got = res ? show(apply(line, res.cells)) : show(line);
+    check(`${tech} [${clues}] ${lineStr}`, got === expected, `got ${got}, expected ${expected}`);
+  }
+
+  // Exact line solver
+  (function () {
+    const r = S.solveLineExact([3], parse('..........'));
+    check('exact: [3] in 10 gives nothing', r.ok && r.cells.length === 0);
+    const r2 = S.solveLineExact([8], parse('..........'));
+    check('exact: [8] in 10 fills 6', show(apply(parse('..........'), r2.cells)) === '..######..');
+    const r3 = S.solveLineExact([2, 2], parse('#..x......'));
+    check('exact: invalid line detected', S.solveLineExact([3], parse('#x#.......')).ok === false);
+    check('exact: [2,2] with edge #', show(apply(parse('#..x......'), r3.cells)) === '##xx......');
+  })();
+
+  techTest('empty-line', [], '..........', 'xxxxxxxxxx');
+  techTest('perfect-fit', [3, 1, 4], '..........', '###x#x####');
+  techTest('line-complete', [2, 1], '.##...#...', 'x##xxx#xxx');
+  techTest('overlap', [7], '..........', '...####...');
+  techTest('overlap', [2, 6], '..........', '.#..#####.');
+  techTest('overlap', [3], '..........', '..........');
+  techTest('gap-too-small', [3, 3], '.x..x.....', 'xxxxx.....');
+  techTest('block-complete', [3, 1], '..###.....', '.x###x....');
+  techTest('constrained-overlap', [4], '..x.......', '..x...#...');
+  techTest('unreachable', [2], '...#......', 'xx.#.xxxxx');
+
+  // Soundness fuzz: every technique's deductions agree with a random solution
+  (function () {
+    let bad = 0, total = 0;
+    for (let t = 0; t < 3000; t++) {
+      const n = 5 + Math.floor(Math.random() * 16);
+      const sol = Array.from({ length: n }, () => Math.random() < 0.55 ? S.FILLED : S.EMPTY);
+      const clues = S.cluesFromLine(sol);
+      const line = sol.map(v => Math.random() < 0.35 ? v : S.UNKNOWN);
+      const a = S.analyzeLine(clues, line);
+      if (!a.ok) { bad++; continue; }
+      for (const tech of S.LINE_TECHNIQUE_ORDER) {
+        const res = S.lineTechniques[tech](clues, line, a);
+        if (!res) continue;
+        total++;
+        for (const { i, v } of res.cells) {
+          if (line[i] !== S.UNKNOWN || sol[i] !== v) { bad++; console.error('unsound', tech, clues, show(line), show(sol)); break; }
+        }
+      }
+    }
+    check(`fuzz: ${total} technique results all sound`, bad === 0, `${bad} unsound`);
+  })();
+
+  // "All possibilities" catches what the simpler techniques miss, and its hint reads cleanly
+  (function () {
+    let found = 0, badText = 0;
+    for (let t = 0; t < 4000 && found < 30; t++) {
+      const n = 6 + Math.floor(Math.random() * 10);
+      const sol = Array.from({ length: n }, () => Math.random() < 0.55 ? S.FILLED : S.EMPTY);
+      const clues = S.cluesFromLine(sol);
+      const line = sol.map(v => Math.random() < 0.3 ? v : S.UNKNOWN);
+      const a = S.analyzeLine(clues, line);
+      const simpler = S.LINE_TECHNIQUE_ORDER.slice(0, -1).some(tech => S.lineTechniques[tech](clues, line, a));
+      if (simpler) continue;
+      const res = S.lineTechniques['line-analysis'](clues, line, a);
+      if (!res) continue;
+      found++;
+      const step = { technique: 'line-analysis', type: 'row', idx: 0, clues, line, lineCells: res.cells,
+        cells: res.cells.map(x => ({ r: 0, c: x.i, v: x.v })), data: res.data };
+      const h = NonogramHints.buildHint(step);
+      if (/undefined|NaN/.test(h.level1 + h.level2 + h.level3 + h.diagram)) badText++;
+    }
+    check(`line-analysis: found ${found} lines only it can solve`, found > 0);
+    check('line-analysis: hint text is clean', badText === 0, `${badText} bad`);
+  })();
+
+  // Every hint produced while solving every built-in puzzle reads cleanly
+  (function () {
+    let total = 0, bad = 0, sample = '';
+    for (const p of NonogramPuzzles.PUZZLES) {
+      const sol = p.solution.map(r => r.map(v => v ? S.FILLED : S.EMPTY));
+      const clues = S.cluesFromSolution(sol);
+      const g = S.emptyGrid(p.height, p.width);
+      for (let i = 0; i < 1000; i++) {
+        const st = S.findNextStep(g, clues);
+        if (!S.TECHNIQUES[st.technique]) break;
+        const h = NonogramHints.buildHint(st);
+        total++;
+        const txt = h.level1 + h.level2 + h.level3 + h.diagram;
+        if (/undefined|NaN|\[object/.test(txt)) { bad++; sample = sample || txt; }
+        // the hint's squares must agree with the solution
+        if (st.cells.some(({ r, c, v }) => sol[r][c] !== v)) { bad++; sample = sample || 'wrong cell in ' + p.id; }
+        st.cells.forEach(({ r, c, v }) => { g[r][c] = v; });
+      }
+    }
+    check(`hints: ${total} hints from all puzzles are clean and correct`, bad === 0, sample.slice(0, 200));
+  })();
+
+  const unitEl = document.getElementById('unit');
+  unitEl.innerHTML = '<h2>Unit tests</h2>' + results.map(r =>
+    `<div class="${r.ok ? 'pass' : 'fail'}">${r.ok ? '✔' : '✘'} ${r.name}${r.ok ? '' : ' — ' + r.info}</div>`).join('');
+
+  // Puzzle validation (async so the page paints first)
+  setTimeout(() => {
+    const rows = [];
+    const diff = {};
+    for (const p of NonogramPuzzles.PUZZLES) {
+      const t0 = performance.now();
+      const ev = S.evaluatePuzzle(p.solution);
+      const ms = Math.round(performance.now() - t0);
+      const ok = ev.unique && ev.logical;
+      if (ok) diff[p.id] = ev.difficulty;
+      rows.push(`<tr><td>${p.name}</td><td>${p.width}×${p.height}</td>
+        <td class="${ev.unique ? 'pass' : 'fail'}">${ev.unique ? 'yes' : 'NO'}</td>
+        <td class="${ev.logical ? 'pass' : 'fail'}">${ev.logical ? 'yes' : 'NO'}</td>
+        <td>${ev.difficulty}</td><td>${Object.entries(ev.counts).map(([k, v]) => k + ':' + v).join(', ')}</td><td>${ms} ms</td></tr>`);
+      window.__puzzleResults = window.__puzzleResults || {};
+      window.__puzzleResults[p.id] = { unique: ev.unique, logical: ev.logical, difficulty: ev.difficulty, ms };
+    }
+    document.getElementById('puzzles').innerHTML = '<h2>Built-in puzzles</h2><table><tr><th>Puzzle</th><th>Size</th><th>Unique</th><th>No guessing</th><th>Difficulty</th><th>Techniques used</th><th>Time</th></tr>' + rows.join('') + '</table>';
+    document.getElementById('summary').textContent = 'const DIFFICULTY = ' + JSON.stringify(diff, null, 2) + ';';
+    window.__testsDone = true;
+    window.__unitFailures = results.filter(r => !r.ok).length;
+  }, 50);
+})();
+</script>
+</body>
+</html>

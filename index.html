@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Nonograms</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="topbar">
+  <button class="brand" data-nav="library" title="All puzzles">
+    <span class="brand-mark" aria-hidden="true"></span>Nonograms
+  </button>
+  <nav>
+    <button data-nav="library">Puzzles</button>
+    <button data-nav="editor">Create</button>
+    <button id="btn-settings" title="Settings" aria-label="Settings">⚙</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ======================= Library ======================= -->
+  <section id="view-library" class="view">
+    <div class="library-intro">
+      <h1>Pick a puzzle</h1>
+      <p>Fill squares so each row and column matches its clues. The numbers give the lengths of the filled blocks, in order, with at least one empty square between blocks. Stuck? Ask for a hint and it explains the reasoning, not just the answer.</p>
+    </div>
+    <div id="library"></div>
+  </section>
+
+  <!-- ======================= Game ======================= -->
+  <section id="view-game" class="view" hidden>
+    <div class="game-head">
+      <button class="ghost" data-nav="library">← Puzzles</button>
+      <div class="game-title">
+        <h2 id="game-title">Puzzle</h2>
+        <span id="game-meta" class="muted"></span>
+      </div>
+      <div id="timer" class="timer" aria-label="Time">0:00</div>
+    </div>
+
+    <div class="game-layout">
+      <div id="board-wrap" class="board-wrap">
+        <div id="board" class="board"></div>
+      </div>
+
+      <aside class="side">
+        <div class="tool-toggle" role="radiogroup" aria-label="Tool">
+          <button id="tool-fill" class="tool active" role="radio" aria-checked="true" title="Fill squares (F)">
+            <span class="tool-icon fill" aria-hidden="true"></span>Fill
+          </button>
+          <button id="tool-x" class="tool" role="radio" aria-checked="false" title="Mark squares as empty (X)">
+            <span class="tool-icon x" aria-hidden="true"></span>Mark empty
+          </button>
+        </div>
+        <p class="tip muted">
+          <span class="tip-mouse">Tip: right-click marks a square as empty. Drag to fill several squares in a line. Keys: H hint, F fill, X mark empty, Ctrl+Z undo.</span>
+          <span class="tip-touch">Tip: switch between Fill and Mark empty above. Drag to fill several squares in a line.</span>
+        </p>
+
+        <div class="actions">
+          <button id="btn-undo" title="Undo (Ctrl+Z)">↶ Undo</button>
+          <button id="btn-redo" title="Redo (Ctrl+Y)">↷ Redo</button>
+          <button id="btn-check" title="Check for mistakes">✓ Check</button>
+          <button id="btn-restart" title="Start this puzzle again">⟲ Restart</button>
+        </div>
+        <button id="btn-hint" class="primary hint-btn" title="Get a hint (H)">💡 Hint</button>
+
+        <div id="hint-panel" class="hint-panel" hidden>
+          <div class="hint-head">
+            <strong id="hint-title">Hint</strong>
+            <button id="hint-close" class="ghost small" aria-label="Close hint">✕</button>
+          </div>
+          <div id="hint-body"></div>
+          <div class="hint-actions">
+            <button id="hint-more" class="primary small">Show more</button>
+            <button id="hint-apply" class="small" hidden>Apply to board</button>
+          </div>
+        </div>
+
+        <div class="stats muted"><span id="stat-hints">Hints used: 0</span></div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ======================= Editor ======================= -->
+  <section id="view-editor" class="view" hidden>
+    <div class="game-head">
+      <button class="ghost" data-nav="library">← Puzzles</button>
+      <div class="game-title"><h2>Create a puzzle</h2><span class="muted">Draw a picture. The clues update as you draw.</span></div>
+    </div>
+    <div class="game-layout">
+      <div id="editor-wrap" class="board-wrap">
+        <div id="editor-board" class="board editor"></div>
+      </div>
+      <aside class="side">
+        <label class="field">Name <input id="ed-name" type="text" maxlength="40" placeholder="My puzzle"></label>
+        <div class="field-row">
+          <label class="field">Width <input id="ed-w" type="number" min="3" max="25" value="10"></label>
+          <label class="field">Height <input id="ed-h" type="number" min="3" max="25" value="10"></label>
+          <button id="ed-resize" class="small">Resize</button>
+        </div>
+        <div class="actions">
+          <button id="ed-clear">Clear</button>
+          <button id="ed-invert">Invert</button>
+          <button id="ed-export">Copy code</button>
+          <button id="ed-import">Paste code</button>
+        </div>
+        <button id="ed-check" class="primary">Check puzzle</button>
+        <div id="ed-result" class="ed-result" hidden></div>
+        <button id="ed-save" class="primary" disabled>Save and play</button>
+        <p class="muted small-text">A puzzle can be saved once it has exactly one solution and can be solved without guessing, so hints always work.</p>
+      </aside>
+    </div>
+  </section>
+</main>
+
+<!-- ======================= Dialogs ======================= -->
+<dialog id="dlg-settings">
+  <form method="dialog">
+    <h2>Settings</h2>
+    <fieldset>
+      <legend>Show mistakes</legend>
+      <label><input type="radio" name="mistakes" value="idle"> After 3 seconds without a move</label>
+      <label><input type="radio" name="mistakes" value="manual"> Only when I press Check</label>
+      <label><input type="radio" name="mistakes" value="never"> Never</label>
+    </fieldset>
+    <fieldset>
+      <legend>Board</legend>
+      <label><input type="checkbox" id="set-crosshair"> Highlight the row and column under the pointer</label>
+      <label><input type="checkbox" id="set-greyclues"> Grey out clues of finished lines</label>
+    </fieldset>
+    <div class="dlg-actions">
+      <button type="button" id="btn-reset-all" class="danger">Reset all progress…</button>
+      <button value="close" class="primary">Done</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-win">
+  <div class="win">
+    <canvas id="win-canvas" width="160" height="160"></canvas>
+    <h2 id="win-title">Solved!</h2>
+    <p id="win-stats" class="muted"></p>
+    <div class="dlg-actions">
+      <button id="win-library">All puzzles</button>
+      <button id="win-next" class="primary">Next puzzle</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="dlg-code">
+  <form method="dialog">
+    <h2 id="code-title">Puzzle code</h2>
+    <p id="code-help" class="muted"></p>
+    <textarea id="code-text" rows="4" spellcheck="false"></textarea>
+    <p id="code-error" class="error" hidden></p>
+    <div class="dlg-actions">
+      <button value="cancel">Cancel</button>
+      <button id="code-ok" value="ok" class="primary">OK</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-confirm">
+  <form method="dialog">
+    <p id="confirm-text"></p>
+    <div class="dlg-actions">
+      <button value="cancel">Cancel</button>
+      <button id="confirm-ok" value="ok" class="danger">OK</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="js/solver.js"></script>
+<script src="js/hints.js"></script>
+<script src="js/puzzles.js"></script>
+<script src="js/board.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
