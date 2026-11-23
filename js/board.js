@@ -162,8 +162,19 @@
       if (opts.onZoom) opts.onZoom(size, manualSize == null);
     }
 
+    /**
+     * On wide screens, let the board frame end just above the bottom of the window,
+     * so its scrollbars are visible without scrolling the page.
+     */
+    function sizeFrame() {
+      if (window.innerWidth <= 860) { wrap.style.maxHeight = ''; return; }
+      const top = wrap.getBoundingClientRect().top + window.scrollY;
+      wrap.style.maxHeight = Math.max(240, Math.floor(window.innerHeight - top - 16)) + 'px';
+    }
+
     function fit() {
       if (!h) return;
+      sizeFrame();
       applySize(manualSize == null ? fitSize() : manualSize);
     }
 
