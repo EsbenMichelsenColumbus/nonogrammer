@@ -20,6 +20,7 @@
 <script src="js/solver.js"></script>
 <script src="js/hints.js"></script>
 <script src="js/puzzles.js"></script>
+<script src="js/image-import.js"></script>
 <script>
 (function () {
   const S = NonogramSolver;
@@ -58,6 +59,114 @@
   techTest('block-complete', [3, 1], '..###.....', '.x###x....');
   techTest('constrained-overlap', [4], '..x.......', '..x...#...');
   techTest('unreachable', [2], '...#......', 'xx.#.xxxxx');
+
+  // Per-number clue dimming (judged from the player's marks only)
+  function doneTest(clues, lineStr, expected) {
+    const got = S.finishedBlocks(clues, parse(lineStr)).map(b => b ? 'D' : '-').join('');
+    check(`finished [${clues}] ${lineStr}`, got === expected, `got ${got}, expected ${expected}`);
+  }
+  doneTest([4, 4, 3], '...............', '---');
+  doneTest([4, 4, 3], '............###', '--D');   // 3 at the end: only place it fits
+  doneTest([4, 4, 3], '####...........', 'D--');
+  doneTest([4, 4, 3], '....###........', '---');   // a run of 3 could still be part of a 4
+  doneTest([4, 4, 3], '..........x###x', '--D');   // bounded 3 at the end
+  doneTest([4, 4, 3], '.....####......', '-D-');   // no room for the first 4 before it
+  doneTest([4, 4, 3], '......####..........', '---');   // could be either 4
+  doneTest([4, 4, 3], '####x####x###..', 'DDD');   // runs match: whole line done
+  doneTest([4, 4, 3], '#####..........', '---');   // a mistake: nothing dims
+  doneTest([], '.....', 'D');
+  doneTest([], '..#..', '-');
+  doneTest([1, 1], '#.#..', 'DD');
+  // Fuzz: a number marked done is always really in that place in every completion
+  (function () {
+    let bad = 0;
+    for (let t = 0; t < 3000; t++) {
+      const n = 5 + Math.floor(Math.random() * 16);
+      const sol = Array.from({ length: n }, () => Math.random() < 0.55 ? S.FILLED : S.EMPTY);
+      const clues = S.cluesFromLine(sol);
+      const line = sol.map(v => Math.random() < 0.5 ? v : S.UNKNOWN);
+      const done = S.finishedBlocks(clues, line);
+      const runs = [];
+      sol.forEach((v, i) => { if (v === S.FILLED && (i === 0 || sol[i - 1] !== S.FILLED)) runs.push(i); });
+      done.forEach((d, i) => {
+        if (!d || !clues.length) return;
+        for (let c = runs[i]; c < runs[i] + clues[i]; c++) if (line[c] !== S.FILLED) { bad++; break; }
+      });
+    }
+    check('finished: fuzz never dims a block that is elsewhere in the solution', bad === 0, `${bad} bad`);
+  })();
+
+  // Picture import helpers
+  (function () {
+    const I = NonogramImage;
+    const t = I.otsu([0.05, 0.1, 0.08, 0.9, 0.85, 0.95, 0.1, 0.92]);
+    check('image: otsu splits dark from light', t > 0.15 && t < 0.85, 'threshold ' + t);
+    const dark = [[0.9, 0, 0, 0], [0, 0, 0.9, 0.9], [0, 0.9, 0.9, 0.9], [0, 0.9, 0.2, 0.9]];
+    const raw = I.toGrid(dark, 0.5, false, false).map(r => r.join('')).join('/');
+    check('image: threshold', raw === '1000/0011/0111/0101', raw);
+    const inv = I.toGrid(dark, 0.5, true, false).map(r => r.join('')).join('/');
+    check('image: invert', inv === '0111/1100/1000/1010', inv);
+    const clean = I.toGrid([[0.9, 0, 0, 0, 0], [0, 0, 0, 0, 0], [0, 0, 0.9, 0.9, 0.9], [0, 0, 0.9, 0.1, 0.9], [0, 0, 0.9, 0.9, 0.9]], 0.5, false, true)
+      .map(r => r.join('')).join('/');
+    check('image: clean removes lone square and fills pinhole', clean === '00000/00000/00111/00111/00111', clean);
+  })();
+
+  // Auto-fix turns ambiguous or random drawings into puzzles that solve without guessing
+  (function () {
+    let fixed = 0, tries = 0, maxFlips = 0;
+    let seed = 11; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const cases = [NonogramPuzzles.toMatrix(['#.#..', '.#.#.', '#.#..', '.....', '..#.#'])];
+    for (let i = 0; i < 5; i++) cases.push(Array.from({ length: 10 }, () => Array.from({ length: 10 }, () => (rnd() < 0.4 ? 1 : 0))));
+    for (const g of cases) {
+      tries++;
+      const avoid = new Set(); let flips = 0, s;
+      for (; flips < 100; flips++) {
+        s = S.repairStep(g, avoid, 60);
+        if (s.solved || s.r < 0) break;
+        g[s.r][s.c] ^= 1; avoid.add(s.r + ',' + s.c);
+      }
+      const ev = S.evaluatePuzzle(g);
+      if (s.solved && ev.unique && ev.logical) fixed++;
+      maxFlips = Math.max(maxFlips, flips);
+    }
+    check(`auto-fix: ${fixed} of ${tries} drawings fixed (at most ${maxFlips} squares changed)`, fixed === tries);
+  })();
+
+  // Big boards: a 100x100 drawing is auto-fixed, checked and replayed hint by hint in reasonable time
+  (function () {
+    const n = 100;
+    let seed = 3; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const blobs = Array.from({ length: 14 }, () => ({ x: rnd() * n, y: rnd() * n, r: 4 + rnd() * 14 }));
+    const g = Array.from({ length: n }, (_, r) => Array.from({ length: n }, (_, c) =>
+      (blobs.some(b => (r - b.y) ** 2 + (c - b.x) ** 2 < b.r * b.r) ? 1 : 0)));
+    const t0 = performance.now();
+    const avoid = new Set(); let s, flips = 0;
+    for (; flips < 600; flips++) {
+      s = S.repairStep(g, avoid, 60);
+      if (s.solved || s.r < 0) break;
+      g[s.r][s.c] ^= 1; avoid.add(s.r + ',' + s.c);
+    }
+    const tFix = performance.now() - t0;
+    const ev = S.evaluatePuzzle(g);
+    const tEval = performance.now() - t0 - tFix;
+    check(`big: 100x100 auto-fix (${flips} squares, ${Math.round(tFix)} ms) gives a unique puzzle without guessing (${ev.difficulty}, ${Math.round(tEval)} ms)`,
+      s.solved && ev.unique && ev.logical);
+    // every hint is correct and none needs a contradiction
+    const sol = g.map(r => r.map(v => (v ? S.FILLED : S.EMPTY)));
+    const clues = S.cluesFromSolution(sol);
+    const grid = S.emptyGrid(n, n);
+    let steps = 0, wrong = 0, contra = 0;
+    const t1 = performance.now();
+    for (; steps < 20000; steps++) {
+      const st = S.findNextStep(grid, clues);
+      if (!S.TECHNIQUES[st.technique]) break;
+      if (st.technique === 'contradiction') contra++;
+      st.cells.forEach(({ r, c, v }) => { if (sol[r][c] !== v) wrong++; grid[r][c] = v; });
+    }
+    const solved = grid.every(r => r.every(v => v !== S.UNKNOWN));
+    check(`big: ${steps} hints replayed in ${Math.round(performance.now() - t1)} ms, all correct, no contradictions`, solved && !wrong && !contra,
+      `solved=${solved} wrong=${wrong} contradictions=${contra}`);
+  })();
 
   // Soundness fuzz: every technique's deductions agree with a random solution
   (function () {

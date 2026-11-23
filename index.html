@@ -40,8 +40,15 @@
     </div>
 
     <div class="game-layout">
-      <div id="board-wrap" class="board-wrap">
-        <div id="board" class="board"></div>
+      <div class="board-col">
+        <div class="zoom-bar" id="zoom-game">
+          <button type="button" class="small" data-zoom="out" title="Zoom out (Ctrl + mouse wheel)" aria-label="Zoom out">−</button>
+          <button type="button" class="small" data-zoom="fit" title="Fit the whole puzzle on screen">Fit</button>
+          <button type="button" class="small" data-zoom="in" title="Zoom in (Ctrl + mouse wheel)" aria-label="Zoom in">+</button>
+        </div>
+        <div id="board-wrap" class="board-wrap">
+          <div id="board" class="board"></div>
+        </div>
       </div>
 
       <aside class="side">
@@ -90,14 +97,21 @@
       <div class="game-title"><h2>Create a puzzle</h2><span class="muted">Draw a picture. The clues update as you draw.</span></div>
     </div>
     <div class="game-layout">
-      <div id="editor-wrap" class="board-wrap">
-        <div id="editor-board" class="board editor"></div>
+      <div class="board-col">
+        <div class="zoom-bar" id="zoom-editor">
+          <button type="button" class="small" data-zoom="out" title="Zoom out (Ctrl + mouse wheel)" aria-label="Zoom out">−</button>
+          <button type="button" class="small" data-zoom="fit" title="Fit the whole puzzle on screen">Fit</button>
+          <button type="button" class="small" data-zoom="in" title="Zoom in (Ctrl + mouse wheel)" aria-label="Zoom in">+</button>
+        </div>
+        <div id="editor-wrap" class="board-wrap">
+          <div id="editor-board" class="board editor"></div>
+        </div>
       </div>
       <aside class="side">
         <label class="field">Name <input id="ed-name" type="text" maxlength="40" placeholder="My puzzle"></label>
         <div class="field-row">
-          <label class="field">Width <input id="ed-w" type="number" min="3" max="25" value="10"></label>
-          <label class="field">Height <input id="ed-h" type="number" min="3" max="25" value="10"></label>
+          <label class="field">Width <input id="ed-w" type="number" min="3" max="100" value="10"></label>
+          <label class="field">Height <input id="ed-h" type="number" min="3" max="100" value="10"></label>
           <button id="ed-resize" class="small">Resize</button>
         </div>
         <div class="actions">
@@ -106,9 +120,12 @@
           <button id="ed-export">Copy code</button>
           <button id="ed-import">Paste code</button>
         </div>
+        <button id="ed-image">🖼 Import picture…</button>
+        <input type="file" id="ed-image-file" accept="image/*" hidden>
         <button id="ed-check" class="primary">Check puzzle</button>
         <div id="ed-result" class="ed-result" hidden></div>
         <button id="ed-save" class="primary" disabled>Save and play</button>
+        <p class="muted small-text">You can also drop a picture on the board or paste one with Ctrl+V.</p>
         <p class="muted small-text">A puzzle can be saved once it has exactly one solution and can be solved without guessing, so hints always work.</p>
       </aside>
     </div>
@@ -128,7 +145,7 @@
     <fieldset>
       <legend>Board</legend>
       <label><input type="checkbox" id="set-crosshair"> Highlight the row and column under the pointer</label>
-      <label><input type="checkbox" id="set-greyclues"> Grey out clues of finished lines</label>
+      <label><input type="checkbox" id="set-greyclues"> Grey out clue numbers whose block is finished</label>
     </fieldset>
     <div class="dlg-actions">
       <button type="button" id="btn-reset-all" class="danger">Reset all progress…</button>
@@ -162,6 +179,32 @@
   </form>
 </dialog>
 
+<dialog id="dlg-image">
+  <form method="dialog" class="img-dlg">
+    <h2>Import a picture</h2>
+    <div class="img-panes">
+      <figure><div class="img-frame"><img id="img-orig" alt="Original picture"></div><figcaption>Original</figcaption></figure>
+      <figure><div class="img-frame"><canvas id="img-preview"></canvas></div><figcaption id="img-info">Puzzle</figcaption></figure>
+    </div>
+    <div class="field-row">
+      <label class="field">Width <input id="img-w" type="number" min="3" max="100" value="20"></label>
+      <label class="field">Height <input id="img-h" type="number" min="3" max="100" value="20"></label>
+    </div>
+    <label class="check"><input type="checkbox" id="img-keep" checked> Keep the picture's proportions</label>
+    <label class="field">Darkness needed to fill a square
+      <input id="img-threshold" type="range" min="2" max="98" value="50">
+    </label>
+    <label class="check"><input type="checkbox" id="img-invert"> Invert (fill the light parts instead)</label>
+    <label class="check"><input type="checkbox" id="img-trim" checked> Cut away the plain border</label>
+    <label class="check"><input type="checkbox" id="img-clean" checked> Remove stray single squares</label>
+    <p class="muted small-text">The picture stays on your computer. Simple, high-contrast pictures such as icons and silhouettes work best.</p>
+    <div class="dlg-actions">
+      <button value="cancel">Cancel</button>
+      <button id="img-ok" value="ok" class="primary">Use this</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="dlg-confirm">
   <form method="dialog">
     <p id="confirm-text"></p>
@@ -178,6 +221,7 @@
 <script src="js/hints.js"></script>
 <script src="js/puzzles.js"></script>
 <script src="js/board.js"></script>
+<script src="js/image-import.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

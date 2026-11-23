@@ -201,6 +201,29 @@
     return { ok, starts, canFill, canEmpty };
   }
 
+  /**
+   * Which clue numbers the player has finished, judged only from the player's
+   * own marks (never the solution). A number counts as done when its block is
+   * fully filled and the marks leave it only one possible position. If the
+   * filled runs already match the clue exactly, every number is done.
+   * Returns one boolean per clue number (one entry for an empty clue).
+   */
+  function finishedBlocks(clues, line) {
+    const got = cluesFromLine(line);
+    if (got.length === clues.length && got.every((v, i) => v === clues[i])) {
+      return clues.length ? clues.map(() => true) : [true];
+    }
+    if (!clues.length) return [false];
+    const a = analyzeLine(clues, line);
+    if (!a.ok) return clues.map(() => false);
+    return clues.map((L, i) => {
+      if (a.starts[i].length !== 1) return false;
+      const s = a.starts[i][0];
+      for (let c = s; c < s + L; c++) if (line[c] !== FILLED) return false;
+      return true;
+    });
+  }
+
   /** Exact line solve: returns {ok, cells:[{i, v}]} with every forced square. */
   function solveLineExact(clues, line) {
     const a = analyzeLine(clues, line);
@@ -405,40 +428,72 @@
    * Returns { ok, steps:[{type, idx, cells}], failedLine }.
    * If `record` is false, steps are not stored.
    */
-  function propagate(grid, clues, record, dirtyLines) {
+  /*
+   * Optional `opts`:
+   *   limit  stop (ok, aborted) after this many line steps that changed something
+   *   trail  array; every changed square is pushed as [r, c] so the caller can undo
+   *   work    object {n}; counts line solves (to keep searches within a budget)
+   */
+  function propagate(grid, clues, record, dirtyLines, opts) {
     const h = grid.length, w = grid[0].length;
+    const limit = opts && opts.limit, trail = opts && opts.trail, work = opts && opts.work;
     const queue = [];
+    let head = 0;
     const inQueue = { row: new Uint8Array(h), col: new Uint8Array(w) };
     const push = (type, idx) => { if (!inQueue[type][idx]) { inQueue[type][idx] = 1; queue.push({ type, idx }); } };
     if (dirtyLines) dirtyLines.forEach(l => push(l.type, l.idx));
     else { for (let r = 0; r < h; r++) push('row', r); for (let c = 0; c < w; c++) push('col', c); }
     const steps = [];
-    while (queue.length) {
-      const { type, idx } = queue.shift();
+    let changedSteps = 0;
+    while (head < queue.length) {
+      const { type, idx } = queue[head++];
       inQueue[type][idx] = 0;
       const cl = type === 'row' ? clues.rows[idx] : clues.cols[idx];
       const line = getLine(grid, type, idx);
+      if (work) work.n++;
       const res = solveLineExact(cl, line);
-      if (!res.ok) return { ok: false, steps, failedLine: { type, idx } };
+      if (!res.ok) return { ok: false, steps, failedLine: { type, idx }, count: changedSteps };
       if (!res.cells.length) continue;
       for (const { i, v } of res.cells) {
         const { r, c } = cellCoord(type, idx, i);
         grid[r][c] = v;
+        if (trail) trail.push([r, c]);
         if (type === 'row') push('col', c); else push('row', r);
       }
+      changedSteps++;
       if (record) steps.push({ type, idx, cells: res.cells.map(x => ({ ...cellCoord(type, idx, x.i), v: x.v })) });
+      if (limit != null && changedSteps > limit) return { ok: true, aborted: true, steps, count: changedSteps };
     }
-    return { ok: true, steps };
+    return { ok: true, steps, count: changedSteps };
   }
 
   // ---------------------------------------------------------------------------
   // Finding the next human-style step
   // ---------------------------------------------------------------------------
 
+  // Per-clue-set cache of line analyses, keyed by the line's current contents.
+  // Repeated calls on a slowly filling grid (logical solve, hints) only analyse changed lines.
+  const lineCache = new WeakMap();
+  function lineEntry(clues, L, grid) {
+    let m = lineCache.get(clues);
+    if (!m) { m = new Map(); lineCache.set(clues, m); }
+    const line = getLine(grid, L.type, L.idx);
+    const key = (L.type === 'row' ? 'r' : 'c') + L.idx + ':' + line.join('');
+    let e = m.get(key);
+    if (!e) {
+      if (m.size > 50000) m.clear();
+      e = { line, a: analyzeLine(L.clues, line), res: {}, open: line.includes(UNKNOWN) };
+      m.set(key, e);
+    }
+    return e;
+  }
+
   /**
    * Find the simplest deduction available on the current grid.
    * The grid must not contain mistakes (check against the solution first).
    * Returns a step object or { technique: 'stuck' } / { technique: 'solved' }.
+   * opts.noContradiction: don't search for contradictions.
+   * opts.anyContradiction: accept the first contradiction found instead of the shortest.
    */
   function findNextStep(grid, clues, opts) {
     opts = opts || {};
@@ -446,30 +501,29 @@
     const lines = allLines(clues);
     const analyses = [];
     for (const L of lines) {
-      const line = getLine(grid, L.type, L.idx);
-      const a = analyzeLine(L.clues, line);
-      if (!a.ok) return { technique: 'invalid', type: L.type, idx: L.idx };
-      analyses.push({ ...L, line, a });
+      const e = lineEntry(clues, L, grid);
+      if (!e.a.ok) return { technique: 'invalid', type: L.type, idx: L.idx };
+      if (e.open) analyses.push({ L, e });
     }
     for (const tech of LINE_TECHNIQUE_ORDER) {
       let best = null, bestScore = -1;
-      for (const L of analyses) {
-        if (!L.line.includes(UNKNOWN)) continue;
-        const res = lineTechniques[tech](L.clues, L.line, L.a);
+      for (const { L, e } of analyses) {
+        let res = e.res[tech];
+        if (res === undefined) res = e.res[tech] = lineTechniques[tech](L.clues, e.line, e.a) || null;
         if (!res) continue;
         const filledCount = res.cells.filter(x => x.v === FILLED).length;
         // prefer steps that fill squares, then more squares
         const score = filledCount * 100 + res.cells.length;
-        if (score > bestScore) { bestScore = score; best = { L, res }; }
+        if (score > bestScore) { bestScore = score; best = { L, e, res }; }
       }
       if (best) {
-        const { L, res } = best;
+        const { L, e, res } = best;
         return {
           technique: tech,
           type: L.type,
           idx: L.idx,
           clues: L.clues,
-          line: L.line,
+          line: e.line.slice(),
           lineCells: res.cells,
           cells: res.cells.map(x => ({ ...cellCoord(L.type, L.idx, x.i), v: x.v })),
           data: res.data,
@@ -477,28 +531,53 @@
       }
     }
     if (opts.noContradiction) return { technique: 'stuck' };
-    return findContradiction(grid, clues) || { technique: 'stuck' };
+    return findContradiction(grid, clues, opts.anyContradiction) || { technique: 'stuck' };
   }
 
-  /** Try every unknown square both ways; return the shortest contradiction. */
-  function findContradiction(grid, clues) {
+  // A contradiction chain longer than this many line steps is not something a person
+  // could follow, so it doesn't count as a usable deduction.
+  const MAX_CHAIN = 40;
+  // Upper bound on line solves in one contradiction search (keeps big boards responsive).
+  const SEARCH_BUDGET = 150000;
+
+  /**
+   * Try unknown squares both ways and look for one that leads to an impossible line.
+   * Squares in nearly finished lines are tried first, as that is where short chains are.
+   * Returns the shortest chain found (or the first one, if `any`).
+   */
+  function findContradiction(grid, clues, any) {
     const h = grid.length, w = grid[0].length;
+    const rowOpen = new Int32Array(h), colOpen = new Int32Array(w);
+    const cand = [];
+    for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
+      if (grid[r][c] !== UNKNOWN) continue;
+      rowOpen[r]++; colOpen[c]++;
+      cand.push(r * w + c);
+    }
+    const prio = k => {
+      const ro = rowOpen[(k / w) | 0], co = colOpen[k % w];
+      return Math.min(ro, co) * 4 + ro + co;
+    };
+    cand.sort((a, b) => prio(a) - prio(b) || a - b);
+    const work = { n: 0 };
+    const trail = [];
     let best = null;
-    for (let r = 0; r < h; r++) {
-      for (let c = 0; c < w; c++) {
-        if (grid[r][c] !== UNKNOWN) continue;
-        for (const assumed of [FILLED, EMPTY]) {
-          const g = cloneGrid(grid);
-          g[r][c] = assumed;
-          const res = propagate(g, clues, true, [{ type: 'row', idx: r }, { type: 'col', idx: c }]);
-          if (res.ok) continue;
-          const len = res.steps.length;
-          if (!best || len < best.len) {
-            best = { len, r, c, assumed, steps: res.steps, failedLine: res.failedLine };
-          }
-        }
+    for (const k of cand) {
+      if (work.n > SEARCH_BUDGET) break;
+      const r = (k / w) | 0, c = k % w;
+      for (const assumed of [FILLED, EMPTY]) {
+        const limit = best ? best.len - 1 : MAX_CHAIN;
+        if (limit < 0) continue;
+        trail.length = 0;
+        grid[r][c] = assumed;
+        const res = propagate(grid, clues, true, [{ type: 'row', idx: r }, { type: 'col', idx: c }], { limit, trail, work });
+        for (const [tr, tc] of trail) grid[tr][tc] = UNKNOWN;
+        grid[r][c] = UNKNOWN;
+        if (res.ok) continue;
+        const len = res.steps.length;
+        if (!best || len < best.len) best = { len, r, c, assumed, steps: res.steps, failedLine: res.failedLine };
       }
-      if (best && best.len <= 1) break;
+      if (best && (any || best.len <= 1)) break;
     }
     if (!best) return null;
     const actual = best.assumed === FILLED ? EMPTY : FILLED;
@@ -522,14 +601,30 @@
   // Whole-puzzle analysis: logical solve, difficulty, uniqueness
   // ---------------------------------------------------------------------------
 
-  /** Solve using only human techniques. Returns {solved, maxLevel, counts, steps}. */
+  /**
+   * Boards with more squares than this must be solvable with line techniques alone
+   * (no contradictions). Searching for contradictions on a 100x100 board is too slow
+   * to do on every check, and line-solvable big puzzles keep hints fast.
+   */
+  const BIG_CELLS = 900;
+  const isBig = (h, w) => h * w > BIG_CELLS;
+
+  /** Solve using only human techniques. Returns {solved, maxLevel, counts, steps, grid}. */
   function logicalSolve(clues, h, w, maxSteps) {
+    const big = isBig(h, w);
+    if (big) {
+      // fast check: line logic to a standstill. If that doesn't finish, the step-by-step solve can't either.
+      const g = emptyGrid(h, w);
+      const res = propagate(g, clues, false);
+      if (!res.ok) return { solved: false, maxLevel: 0, counts: {}, steps: 0, grid: g, reason: 'invalid' };
+      if (!isComplete(g)) return { solved: false, maxLevel: 0, counts: {}, steps: 0, grid: g, reason: 'stuck' };
+    }
     const grid = emptyGrid(h, w);
     const counts = {};
     let maxLevel = 0, steps = 0;
-    maxSteps = maxSteps || 100000;
+    maxSteps = maxSteps || 1000000;
     while (steps < maxSteps) {
-      const step = findNextStep(grid, clues);
+      const step = findNextStep(grid, clues, { anyContradiction: true, noContradiction: big });
       if (step.technique === 'solved') return { solved: true, maxLevel, counts, steps, grid };
       if (step.technique === 'stuck' || step.technique === 'invalid') {
         return { solved: false, maxLevel, counts, steps, grid, reason: step.technique };
@@ -542,13 +637,19 @@
     return { solved: false, maxLevel, counts, steps, grid, reason: 'limit' };
   }
 
-  /** Count solutions (stops at `limit`). Returns {count, solutions}. */
-  function countSolutions(clues, h, w, limit) {
+  /**
+   * Count solutions (stops at `limit`, or after `maxNodes` guesses).
+   * Returns {count, solutions, complete}; complete is false if the search was cut short.
+   */
+  function countSolutions(clues, h, w, limit, maxNodes) {
     limit = limit || 2;
+    maxNodes = maxNodes || 20000;
     const solutions = [];
-    function rec(grid) {
+    let nodes = 0, cut = false;
+    function rec(grid, dirty) {
       if (solutions.length >= limit) return;
-      const res = propagate(grid, clues, false);
+      if (++nodes > maxNodes) { cut = true; return; }
+      const res = propagate(grid, clues, false, dirty);
       if (!res.ok) return;
       let br = -1, bc = -1;
       outer: for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) if (grid[r][c] === UNKNOWN) { br = r; bc = c; break outer; }
@@ -556,30 +657,33 @@
       for (const v of [FILLED, EMPTY]) {
         const g = cloneGrid(grid);
         g[br][bc] = v;
-        rec(g);
-        if (solutions.length >= limit) return;
+        rec(g, [{ type: 'row', idx: br }, { type: 'col', idx: bc }]);
+        if (solutions.length >= limit || cut) return;
       }
     }
     rec(emptyGrid(h, w));
-    return { count: solutions.length, solutions };
+    return { count: solutions.length, solutions, complete: !cut };
   }
 
   /**
    * Full check for a puzzle drawn as a 0/1 matrix.
    * Returns {unique, logical, difficulty, level, counts, altSolution}.
+   * A puzzle that the techniques solve is unique (every step is a sound deduction),
+   * so the slower search for a second solution only runs when logic gets stuck.
    */
   function evaluatePuzzle(solution01) {
     const h = solution01.length, w = solution01[0].length;
     const sol = solution01.map(r => r.map(v => (v ? FILLED : EMPTY)));
     const clues = cluesFromSolution(sol);
-    const cs = countSolutions(clues, h, w, 2);
-    const unique = cs.count === 1;
-    let alt = null;
-    if (!unique && cs.solutions.length) {
-      alt = cs.solutions.find(s => s.some((row, r) => row.some((v, c) => v !== sol[r][c]))) || null;
-    }
     const ls = logicalSolve(clues, h, w);
     const logical = ls.solved;
+    let unique = logical, alt = null;
+    if (!logical) {
+      // on big boards only a short search for a second solution (to show where it differs)
+      const cs = countSolutions(clues, h, w, 2, isBig(h, w) ? 200 : 20000);
+      unique = cs.count === 1 && cs.complete;
+      if (cs.count > 1) alt = cs.solutions.find(s => s.some((row, r) => row.some((v, c) => v !== sol[r][c]))) || null;
+    }
     const level = ls.maxLevel || 1;
     return {
       unique,
@@ -593,13 +697,120 @@
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // Auto-fix: change as few squares as possible so a drawing becomes solvable
+  // ---------------------------------------------------------------------------
+
+  /** Squares the plain line solver leaves open for a 0/1 picture (a quick score). */
+  function quickUnknown(grid01) {
+    const h = grid01.length, w = grid01[0].length;
+    const clues = cluesFromSolution(grid01.map(r => r.map(v => (v ? FILLED : EMPTY))));
+    const g = emptyGrid(h, w);
+    propagate(g, clues, false);
+    let n = 0;
+    for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) if (g[r][c] === UNKNOWN) n++;
+    return n;
+  }
+
+  /**
+   * One auto-fix step. Finds where solving gets stuck and picks the single
+   * square whose change helps most. Squares on the picture's outline are tried
+   * first, because changing them alters the picture least.
+   * Returns {solved:true} or {r, c, stuck, score}. `avoid` is a Set of "r,c" keys not to flip.
+   */
+  function repairStep(grid01, avoid, maxCandidates) {
+    const h = grid01.length, w = grid01[0].length;
+    const big = isBig(h, w);
+    const clues = cluesFromSolution(grid01.map(r => r.map(v => (v ? FILLED : EMPTY))));
+    // Line logic first: if it solves everything, the puzzle is fine.
+    const base = emptyGrid(h, w);
+    propagate(base, clues, false);
+    if (isComplete(base)) return { solved: true };
+    // Small boards may also use contradictions. Big boards aim for line logic only,
+    // which keeps both this search and later hints fast.
+    let ls = { grid: base };
+    if (!big) {
+      ls = logicalSolve(clues, h, w);
+      if (ls.solved) return { solved: true };
+    }
+    const at = (r, c) => (r >= 0 && r < h && c >= 0 && c < w ? grid01[r][c] : 0);
+    // known squares, with the board's border counting as known
+    const known = (r, c) => r < 0 || r >= h || c < 0 || c >= w || ls.grid[r][c] !== UNKNOWN;
+    // Priority: next to what is already solved (where solving stalled), then on the picture's outline
+    const tiers = [[], [], [], []];
+    let stuck = 0;
+    for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
+      if (ls.grid[r][c] !== UNKNOWN) continue;
+      stuck++;
+      if (avoid && avoid.has(r + ',' + c)) continue;
+      const v = grid01[r][c];
+      const onEdge = at(r - 1, c) !== v || at(r + 1, c) !== v || at(r, c - 1) !== v || at(r, c + 1) !== v;
+      const frontier = known(r - 1, c) || known(r + 1, c) || known(r, c - 1) || known(r, c + 1);
+      // big boards: outline squares first, spread over the whole stuck area, so fixes
+      // look like small bumps on the picture rather than new lines along one edge
+      if (big) tiers[(onEdge ? 0 : 2) + (frontier ? 0 : 1)].push([r, c]);
+      else tiers[(frontier ? 0 : 2) + (onEdge ? 0 : 1)].push([r, c]);
+    }
+    const max = maxCandidates || 80;
+    let candidates;
+    if (big) {
+      const spread = (list, n) => (list.length <= n ? list : Array.from({ length: n }, (_, i) => list[Math.floor(i * list.length / n)]));
+      candidates = [];
+      for (const t of tiers) candidates = candidates.concat(spread(t, max - candidates.length));
+    } else {
+      candidates = [].concat(...tiers).slice(0, max);
+    }
+    if (!candidates.length) return { solved: false, stuck, r: -1, c: -1 };
+    // how well a changed square blends in: original neighbours that have its new value
+    // (earlier auto-fix changes don't count, so fixes don't grow into lines)
+    const blend = (r, c) => {
+      const nv = grid01[r][c] ^ 1;
+      let n = 0;
+      for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+        if (!(dr || dc)) continue;
+        if (avoid && avoid.has((r + dr) + ',' + (c + dc))) { n -= 2; continue; }
+        if (at(r + dr, c + dc) === nv) n++;
+      }
+      return n;
+    };
+    let best = null;
+    for (const [r, c] of candidates) {
+      const b = blend(r, c);
+      grid01[r][c] ^= 1;
+      const score = big ? quickUnknownFrom(base, clues, grid01, r, c) : quickUnknown(grid01);
+      grid01[r][c] ^= 1;
+      if (!best || score < best.score || (score === best.score && b > best.b)) best = { r, c, score, b };
+    }
+    return { solved: false, stuck, r: best.r, c: best.c, score: best.score };
+  }
+
+  /**
+   * Quick score for big boards: start from the already-propagated grid, forget
+   * the changed square's row and column, and re-propagate from there only.
+   */
+  function quickUnknownFrom(base, clues, grid01, r, c) {
+    const h = grid01.length, w = grid01[0].length;
+    const g = cloneGrid(base);
+    for (let i = 0; i < w; i++) g[r][i] = UNKNOWN;
+    for (let i = 0; i < h; i++) g[i][c] = UNKNOWN;
+    const cl = { rows: clues.rows.slice(), cols: clues.cols.slice() };
+    cl.rows[r] = cluesFromLine(grid01[r].map(v => (v ? FILLED : EMPTY)));
+    cl.cols[c] = cluesFromLine(grid01.map(row => (row[c] ? FILLED : EMPTY)));
+    const res = propagate(g, cl, false, [{ type: 'row', idx: r }, { type: 'col', idx: c }]);
+    if (!res.ok) return h * w; // the shortcut broke down; rank it last
+    let n = 0;
+    for (let i = 0; i < h; i++) for (let j = 0; j < w; j++) if (g[i][j] === UNKNOWN) n++;
+    return n;
+  }
+
   global.NonogramSolver = {
+    repairStep,
     UNKNOWN, FILLED, EMPTY,
     TECHNIQUES, LINE_TECHNIQUE_ORDER, rateDifficulty,
     cluesFromLine, cluesFromSolution,
-    analyzeLine, solveLineExact,
+    analyzeLine, solveLineExact, finishedBlocks,
     lineTechniques,
-    findNextStep, findContradiction, propagate,
+    findNextStep, findContradiction, propagate, isBig,
     logicalSolve, countSolutions, evaluatePuzzle,
     getLine, cellCoord, emptyGrid, cloneGrid,
   };
