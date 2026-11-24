@@ -28,7 +28,7 @@
   // Largest puzzle side, in squares
   const MAX_SIZE = 100;
 
-  const settings = Object.assign({ mistakes: 'idle', crosshair: true, greyClues: true }, load(KEY.settings, {}));
+  const settings = Object.assign({ mistakes: 'idle', mistakeDelay: 10, crosshair: true, greyClues: true }, load(KEY.settings, {}));
   let progress = load(KEY.progress, {});
   let customPuzzles = load(KEY.custom, []);
 
@@ -385,7 +385,7 @@
   function clearWrong(r, c) { const el = board.cellEl(r, c); if (el) el.classList.remove('wrong'); }
   function scheduleMistakeCheck() {
     clearTimeout(mistakeTimer);
-    if (settings.mistakes === 'idle' && game && !game.solved) mistakeTimer = setTimeout(showMistakes, 3000);
+    if (settings.mistakes === 'idle' && game && !game.solved) mistakeTimer = setTimeout(showMistakes, (+settings.mistakeDelay || 10) * 1000);
   }
   function applyMistakeSetting() {
     $('btn-check').hidden = settings.mistakes !== 'manual';
@@ -931,11 +931,19 @@
     document.querySelectorAll('input[name="mistakes"]').forEach(i => { i.checked = i.value === settings.mistakes; });
     $('set-crosshair').checked = settings.crosshair;
     $('set-greyclues').checked = settings.greyClues;
+    $('set-delay').value = String(settings.mistakeDelay || 10);
     $('dlg-settings').showModal();
   };
   document.querySelectorAll('input[name="mistakes"]').forEach(i => i.addEventListener('change', () => {
     settings.mistakes = i.value; store(KEY.settings, settings); applyMistakeSetting();
   }));
+  $('set-delay').onchange = e => {
+    settings.mistakeDelay = +e.target.value;
+    // picking a delay means "show mistakes after a pause"
+    settings.mistakes = 'idle';
+    document.querySelectorAll('input[name="mistakes"]').forEach(i => { i.checked = i.value === 'idle'; });
+    store(KEY.settings, settings); applyMistakeSetting();
+  };
   $('set-crosshair').onchange = e => { settings.crosshair = e.target.checked; store(KEY.settings, settings); };
   $('set-greyclues').onchange = e => {
     settings.greyClues = e.target.checked; store(KEY.settings, settings);

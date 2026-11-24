@@ -204,14 +204,21 @@
   /**
    * Which clue numbers the player has finished, judged only from the player's
    * own marks (never the solution). A number counts as done when its block is
-   * fully filled and the marks leave it only one possible position. If the
-   * filled runs already match the clue exactly, every number is done.
+   * fully filled, the marks leave it only one possible position, and it is
+   * closed off by an X (or the end of the line) on both sides. If the filled
+   * runs already match the clue exactly, each closed-off block is done.
    * Returns one boolean per clue number (one entry for an empty clue).
    */
   function finishedBlocks(clues, line) {
+    const n = line.length;
+    // a block only counts as finished once it is closed off: an X or the end of the line on both sides
+    const closed = (s, L) => (s === 0 || line[s - 1] === EMPTY) && (s + L === n || line[s + L] === EMPTY);
     const got = cluesFromLine(line);
     if (got.length === clues.length && got.every((v, i) => v === clues[i])) {
-      return clues.length ? clues.map(() => true) : [true];
+      if (!clues.length) return [true];
+      const starts = [];
+      line.forEach((v, i) => { if (v === FILLED && (i === 0 || line[i - 1] !== FILLED)) starts.push(i); });
+      return clues.map((L, i) => closed(starts[i], L));
     }
     if (!clues.length) return [false];
     const a = analyzeLine(clues, line);
@@ -220,7 +227,7 @@
       if (a.starts[i].length !== 1) return false;
       const s = a.starts[i][0];
       for (let c = s; c < s + L; c++) if (line[c] !== FILLED) return false;
-      return true;
+      return closed(s, L);
     });
   }
 

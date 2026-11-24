@@ -8,7 +8,8 @@ Double-click `index.html`. It runs in any modern browser with no install or buil
 
 - **Fill / Mark empty**: switch tools, or left-click to fill and right-click to mark a square empty. Drag to paint a whole run in one row or column.
 - **Keys**: `H` hint, `F` fill tool, `X` mark-empty tool, `Ctrl+Z` / `Ctrl+Y` undo and redo, `Esc` close the hint.
-- **Mistakes** (in ⚙ Settings): shown after 3 seconds without a move (default), only when you press Check, or never.
+- **Mistakes** (in ⚙ Settings): shown in red after a pause without a move (10 seconds by default; 5 seconds to 1 minute), only when you press Check, or never.
+- **Finished clue numbers** grey out once their block is filled, can only be in that place, and is closed off by an X (or the edge) on both sides.
 - **Zoom**: the −, Fit and + buttons above the board, or Ctrl + mouse wheel. On big puzzles the clues stay visible while you scroll, and a hint scrolls the board to the right place.
 
 ## Hints

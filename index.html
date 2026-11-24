@@ -138,7 +138,11 @@
     <h2>Settings</h2>
     <fieldset>
       <legend>Show mistakes</legend>
-      <label><input type="radio" name="mistakes" value="idle"> After 3 seconds without a move</label>
+      <label><input type="radio" name="mistakes" value="idle"> After
+        <select id="set-delay" aria-label="Seconds without a move before mistakes show">
+          <option value="5">5 seconds</option><option value="10">10 seconds</option><option value="20">20 seconds</option>
+          <option value="30">30 seconds</option><option value="60">1 minute</option>
+        </select> without a move</label>
       <label><input type="radio" name="mistakes" value="manual"> Only when I press Check</label>
       <label><input type="radio" name="mistakes" value="never"> Never</label>
     </fieldset>

@@ -66,17 +66,22 @@
     check(`finished [${clues}] ${lineStr}`, got === expected, `got ${got}, expected ${expected}`);
   }
   doneTest([4, 4, 3], '...............', '---');
-  doneTest([4, 4, 3], '............###', '--D');   // 3 at the end: only place it fits
-  doneTest([4, 4, 3], '####...........', 'D--');
+  doneTest([4, 4, 3], '............###', '---');   // 3 at the end, but not closed off by an X yet
+  doneTest([4, 4, 3], '...........x###', '--D');   // X on the left, end of the line on the right
+  doneTest([4, 4, 3], '####...........', '---');   // first 4 placed but still open on the right
+  doneTest([4, 4, 3], '####x..........', 'D--');
   doneTest([4, 4, 3], '....###........', '---');   // a run of 3 could still be part of a 4
-  doneTest([4, 4, 3], '..........x###x', '--D');   // bounded 3 at the end
-  doneTest([4, 4, 3], '.....####......', '-D-');   // no room for the first 4 before it
+  doneTest([4, 4, 3], '..........x###x', '--D');   // closed 3 at the end
+  doneTest([4, 4, 3], '.....####......', '---');   // forced to be the second 4, but open on both sides
+  doneTest([4, 4, 3], '....x####x.....', '-D-');
   doneTest([4, 4, 3], '......####..........', '---');   // could be either 4
-  doneTest([4, 4, 3], '####x####x###..', 'DDD');   // runs match: whole line done
+  doneTest([4, 4, 3], '####x####x###..', 'DD-');   // runs match, but the 3 is still open
+  doneTest([4, 4, 3], '####x####x###x.', 'DDD');
   doneTest([4, 4, 3], '#####..........', '---');   // a mistake: nothing dims
   doneTest([], '.....', 'D');
   doneTest([], '..#..', '-');
-  doneTest([1, 1], '#.#..', 'DD');
+  doneTest([1, 1], '#.#..', '--');
+  doneTest([1, 1], '#x#x.', 'DD');
   // Fuzz: a number marked done is always really in that place in every completion
   (function () {
     let bad = 0;
