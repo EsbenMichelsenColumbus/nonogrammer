@@ -294,6 +294,10 @@
         board.setCell(rr, cc, target);
         clearWrong(rr, cc);
       },
+      cancel() {
+        changes.forEach(({ r: rr, c: cc, from }) => { game.grid[rr][cc] = from; board.setCell(rr, cc, from); });
+        changes.clear();
+      },
     };
   }
 
@@ -605,9 +609,19 @@
   }
   function edStrokeStart(r, c, button) {
     const target = button === 2 ? 0 : (ed.grid[r][c] ? 0 : 1);
+    const changed = [];
     return {
+      cancel() {
+        changed.forEach(([rr, cc]) => {
+          ed.grid[rr][cc] = 1 - target;
+          edBoard.setCell(rr, cc, ed.grid[rr][cc] ? FILLED : UNKNOWN);
+          edLineClues(rr, cc);
+        });
+        changed.length = 0;
+      },
       visit(rr, cc) {
         if (ed.grid[rr][cc] === target) return;
+        changed.push([rr, cc]);
         ed.grid[rr][cc] = target;
         edBoard.setCell(rr, cc, target ? FILLED : UNKNOWN);
         edLineClues(rr, cc);

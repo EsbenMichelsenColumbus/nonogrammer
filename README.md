@@ -4,13 +4,18 @@ A browser nonogram game whose hints teach you how to solve, instead of just reve
 
 ## Play
 
-Double-click `index.html`. It runs in any modern browser with no install or build step. Progress, settings and your own puzzles are saved in the browser.
+Play online at **https://esbenmichelsencolumbus.github.io/nonogrammer/**, or double-click `index.html` to play offline. It runs in any modern browser, on a computer or a phone, with no install or build step. Progress, settings and your own puzzles are saved in the browser (separately for the online and offline versions).
 
 - **Fill / Mark empty**: switch tools, or left-click to fill and right-click to mark a square empty. Drag to paint a whole run in one row or column.
 - **Keys**: `H` hint, `F` fill tool, `X` mark-empty tool, `Ctrl+Z` / `Ctrl+Y` undo and redo, `Esc` close the hint.
 - **Mistakes** (in ⚙ Settings): shown in red after a pause without a move (10 seconds by default; 5 seconds to 1 minute), only when you press Check, or never.
 - **Finished clue numbers** grey out once their block is filled, can only be in that place, and is closed off by an X (or the edge) on both sides.
-- **Zoom**: the −, Fit and + buttons above the board, or Ctrl + mouse wheel. On big puzzles the clues stay visible while you scroll, and a hint scrolls the board to the right place.
+- **Zoom**: the −, Fit and + buttons above the board, or Ctrl + mouse wheel. Fit shows the whole board. On big puzzles the clues stay visible while you scroll, and a hint scrolls the board to the right place.
+- **On a phone**: one finger fills (or marks, with the Mark empty tool), two fingers move and pinch-zoom the board, and dragging along the clue numbers scrolls.
+
+### Publishing on GitHub Pages
+
+The site is plain static files, so GitHub Pages can serve it as it is: in the repository's **Settings → Pages**, choose **Deploy from a branch**, branch `main`, folder `/ (root)`. The `.nojekyll` file tells Pages to serve the files without processing them.
 
 ## Hints
 
@@ -65,12 +70,14 @@ This is advice only: you can save a puzzle that misses targets. Puzzles under 10
 
 ```
 index.html        page
+favicon.svg       browser tab icon
+.nojekyll         tells GitHub Pages to serve the files as they are
 css/style.css     styles (light and dark)
 js/solver.js      technique-based solver, uniqueness check, difficulty rating
 js/hints.js       turns solver steps into explanations and diagrams
 js/quality.js     puzzle quality measures and targets
 js/puzzles.js     built-in puzzles ('#' filled, '.' empty)
-js/board.js       board rendering and drag input
+js/board.js       board rendering, drag input, zoom and touch gestures
 js/image-import.js picture to grid: sampling, threshold, clean-up
 js/app.js         library, game, hints panel, editor, settings
 tests.html        solver tests + validation of every built-in puzzle
