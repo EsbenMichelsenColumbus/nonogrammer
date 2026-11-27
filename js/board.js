@@ -21,7 +21,9 @@
 
     function build(clueSet, height, width) {
       h = height; w = width; clues = clueSet;
+      manualSize = null; crossEls = []; crossAt = { r: -1, c: -1 };
       el.innerHTML = '';
+      el.classList.toggle('big', Math.max(h, w) > 30);
       el.style.setProperty('--w', w);
       el.classList.remove('solved');
       cells = []; rowClues = []; colClues = [];
@@ -76,6 +78,19 @@
       clueSet.cols.forEach((l, c) => fill(colClues[c], l));
     }
 
+    /** Replace the clue of one row or column (cheaper than setClues on big boards). */
+    function setLineClue(type, idx, list) {
+      const node = (type === 'row' ? rowClues : colClues)[idx];
+      if (!node) return;
+      (type === 'row' ? clues.rows : clues.cols)[idx] = list;
+      node.innerHTML = '';
+      (list.length ? list : [0]).forEach(n => {
+        const s = document.createElement('span');
+        s.textContent = n;
+        node.appendChild(s);
+      });
+    }
+
     function setCell(r, c, v) {
       const d = cells[r][c];
       d.classList.toggle('f', v === FILLED);
@@ -86,8 +101,13 @@
       for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) setCell(r, c, grid[r][c]);
     }
 
+    /** done: one boolean per clue number, or a single boolean for the whole line. */
     function setClueDone(type, idx, done) {
-      (type === 'row' ? rowClues : colClues)[idx].classList.toggle('done', done);
+      const node = (type === 'row' ? rowClues : colClues)[idx];
+      const spans = node.children;
+      const list = Array.isArray(done) ? done : Array.from(spans, () => done);
+      for (let i = 0; i < spans.length; i++) spans[i].classList.toggle('done', !!list[i]);
+      node.classList.toggle('done', list.length > 0 && list.every(Boolean));
     }
 
     function lineEls(type, idx) {
@@ -103,13 +123,18 @@
 
     function cellEl(r, c) { return cells[r] && cells[r][c]; }
 
-    // ---------------------------------------------------------------- sizing
-    function fit() {
-      if (!h) return;
+    // ---------------------------------------------------------------- sizing & zoom
+    // Square sizes the zoom buttons step through
+    const ZOOM_STEPS = [6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 44];
+    let manualSize = null; // null = fit to the screen
+    let cellSize = 28;
+
+    function fitSize() {
       const maxRow = Math.max(1, ...clues.rows.map(l => l.length || 1));
       const maxCol = Math.max(1, ...clues.cols.map(l => l.length || 1));
       const style = getComputedStyle(wrap);
-      const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + 4;
+      const bs = getComputedStyle(el);
+      const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + parseFloat(bs.paddingLeft) + parseFloat(bs.paddingRight) + 4;
       const availW = wrap.clientWidth - padX;
       let size = availW / (w + maxRow * 0.78 + 0.4);
       if (window.innerWidth > 860) {
@@ -117,8 +142,65 @@
         const availH = window.innerHeight - Math.min(top, 140) - 60;
         size = Math.min(size, availH / (h + maxCol * 0.62 + 0.3));
       }
-      size = Math.max(14, Math.min(36, Math.floor(size)));
+      // small puzzles stay finger-sized (the page scrolls instead); big ones may shrink further
+      const min = Math.max(h, w) > 30 ? 6 : 14;
+      return Math.max(min, Math.min(36, Math.floor(size)));
+    }
+
+    function applySize(size, anchor) {
+      // keep the point under `anchor` (client coordinates) in place while zooming
+      const rect = wrap.getBoundingClientRect();
+      const ax = anchor ? anchor.x - rect.left : wrap.clientWidth / 2;
+      const ay = anchor ? anchor.y - rect.top : wrap.clientHeight / 2;
+      const fx = (wrap.scrollLeft + ax) / Math.max(1, wrap.scrollWidth);
+      const fy = (wrap.scrollTop + ay) / Math.max(1, wrap.scrollHeight);
+      cellSize = size;
       el.style.setProperty('--cell', size + 'px');
+      el.classList.toggle('tiny', size < 12);
+      wrap.scrollLeft = fx * wrap.scrollWidth - ax;
+      wrap.scrollTop = fy * wrap.scrollHeight - ay;
+      if (opts.onZoom) opts.onZoom(size, manualSize == null);
+    }
+
+    /**
+     * On wide screens, let the board frame end just above the bottom of the window,
+     * so its scrollbars are visible without scrolling the page.
+     */
+    function sizeFrame() {
+      if (window.innerWidth <= 860) { wrap.style.maxHeight = ''; return; }
+      const top = wrap.getBoundingClientRect().top + window.scrollY;
+      wrap.style.maxHeight = Math.max(240, Math.floor(window.innerHeight - top - 16)) + 'px';
+    }
+
+    function fit() {
+      if (!h) return;
+      sizeFrame();
+      applySize(manualSize == null ? fitSize() : manualSize);
+    }
+
+    function zoom(dir, anchor) {
+      if (!h) return;
+      if (dir === 'fit') { manualSize = null; applySize(fitSize()); return; }
+      const next = dir > 0 ? ZOOM_STEPS.find(s => s > cellSize) : [...ZOOM_STEPS].reverse().find(s => s < cellSize);
+      if (next == null) return;
+      manualSize = next;
+      applySize(next, anchor);
+    }
+
+    // Ctrl + mouse wheel (and trackpad pinch, which browsers report the same way) zooms
+    wrap.addEventListener('wheel', e => {
+      if (!e.ctrlKey || !h) return;
+      e.preventDefault();
+      zoom(e.deltaY < 0 ? 1 : -1, { x: e.clientX, y: e.clientY });
+    }, { passive: false });
+
+    if (opts.zoomBar) {
+      opts.zoomBar.addEventListener('click', e => {
+        const b = e.target.closest('[data-zoom]');
+        if (!b) return;
+        const d = b.dataset.zoom;
+        zoom(d === 'fit' ? 'fit' : d === 'in' ? 1 : -1);
+      });
     }
 
     // ---------------------------------------------------------------- input
@@ -184,19 +266,36 @@
     el.addEventListener('pointerleave', e => { if (!stroke && e.pointerType === 'mouse') updateCross(-1, -1); });
 
     let crossAt = { r: -1, c: -1 };
+    let crossEls = [];
     function updateCross(r, c) {
       const enabled = opts.crosshair && opts.crosshair();
       if (!enabled) { r = -1; c = -1; }
       if (r === crossAt.r && c === crossAt.c) return;
-      clearClass('cross');
+      // only touch the squares that change (a 100x100 board has 10,000 of them)
+      crossEls.forEach(x => x.classList.remove('cross'));
       crossAt = { r, c };
-      if (r < 0) return;
-      lineEls('row', r).forEach(x => x.classList.add('cross'));
-      lineEls('col', c).forEach(x => x.classList.add('cross'));
+      crossEls = r < 0 ? [] : lineEls('row', r).concat(lineEls('col', c));
+      crossEls.forEach(x => x.classList.add('cross'));
     }
 
     return {
-      build, setClues, setCell, renderGrid, setClueDone, lineEls, clearClass, cellEl, fit,
+      build, setClues, setLineClue, setCell, renderGrid, setClueDone, lineEls, clearClass, cellEl, fit, zoom,
+      /** scroll so square (r, c) is visible (for hints on big boards) */
+      reveal(r, c) {
+        const d = cells[r] && cells[r][c];
+        if (!d) return;
+        // the clue headers stick to the top and left, so keep the square clear of them
+        const dr = d.getBoundingClientRect(), wr = wrap.getBoundingClientRect();
+        const top = wr.top + (colClues[0] ? colClues[0].getBoundingClientRect().height : 0);
+        const left = wr.left + (rowClues[0] ? rowClues[0].getBoundingClientRect().width : 0);
+        const margin = cellSize * 2;
+        let dx = 0, dy = 0;
+        if (dr.left < left + margin) dx = dr.left - left - margin;
+        else if (dr.right > wr.right - margin) dx = dr.right - wr.right + margin;
+        if (dr.top < top + margin) dy = dr.top - top - margin;
+        else if (dr.bottom > wr.bottom - margin) dy = dr.bottom - wr.bottom + margin;
+        if (dx || dy) wrap.scrollBy({ left: dx, top: dy, behavior: 'smooth' });
+      },
       get size() { return { h, w }; },
       setSolved(on) { el.classList.toggle('solved', on); },
     };

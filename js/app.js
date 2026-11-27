@@ -16,11 +16,19 @@
   function load(key, fallback) {
     try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (_) { return fallback; }
   }
+  let storeWarned = false;
   function store(key, value) {
-    try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) { /* ignore */ }
+    try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch (_) {
+      // usually a full browser storage (big puzzles take more room); say so once
+      if (!storeWarned) { storeWarned = true; setTimeout(() => toast('Could not save: the browser’s storage for this page is full or blocked.'), 0); }
+      return false;
+    }
   }
 
-  const settings = Object.assign({ mistakes: 'idle', crosshair: true, greyClues: true }, load(KEY.settings, {}));
+  // Largest puzzle side, in squares
+  const MAX_SIZE = 100;
+
+  const settings = Object.assign({ mistakes: 'idle', mistakeDelay: 10, crosshair: true, greyClues: true }, load(KEY.settings, {}));
   let progress = load(KEY.progress, {});
   let customPuzzles = load(KEY.custom, []);
 
@@ -29,14 +37,18 @@
   // ===========================================================================
   const evalCache = new Map();
   function prepareCustom(p) {
-    const solution = window.NonogramPuzzles.toMatrix(p.rows);
-    return { ...p, width: p.rows[0].length, height: p.rows.length, solution, builtIn: false };
+    // older saves may still have empty edge rows/columns: drop them like on save
+    const rows = window.NonogramPuzzles.trimRows(p.rows);
+    const solution = window.NonogramPuzzles.toMatrix(rows);
+    return { ...p, rows, width: rows[0].length, height: rows.length, solution, builtIn: false };
   }
   function allPuzzles() {
     return window.NonogramPuzzles.PUZZLES.concat(customPuzzles.map(prepareCustom));
   }
   function findPuzzle(id) { return allPuzzles().find(p => p.id === id); }
   function puzzleInfo(p) {
+    // your own puzzles store their difficulty when saved (big ones take a moment to rate)
+    if (!p.builtIn && p.difficulty) return { difficulty: p.difficulty };
     const key = p.id + ':' + p.rows.join('');
     if (!evalCache.has(key)) evalCache.set(key, S.evaluatePuzzle(p.solution));
     return evalCache.get(key);
@@ -121,7 +133,7 @@
     const builtIns = window.NonogramPuzzles.PUZZLES;
     const groups = new Map();
     builtIns.forEach((p, i) => {
-      const key = `${p.width} × ${p.height}`;
+      const key = p.group || `${p.width} × ${p.height}`;
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push({ p, i });
     });
@@ -213,6 +225,7 @@
     onStrokeStart: gameStrokeStart,
     onStrokeEnd: gameStrokeEnd,
     crosshair: () => settings.crosshair,
+    zoomBar: $('zoom-game'),
   });
 
   let game = null; // { puzzle, clues, grid, undo, redo, time, hints, solved, hint }
@@ -348,9 +361,7 @@
   function updateClue(type, idx) {
     const line = S.getLine(game.grid, type, idx);
     const target = type === 'row' ? game.clues.rows[idx] : game.clues.cols[idx];
-    const got = S.cluesFromLine(line);
-    const done = settings.greyClues && got.length === target.length && got.every((v, i) => v === target[i]);
-    board.setClueDone(type, idx, done);
+    board.setClueDone(type, idx, settings.greyClues ? S.finishedBlocks(target, line) : false);
   }
   function updateAllClues() {
     for (let r = 0; r < game.puzzle.height; r++) updateClue('row', r);
@@ -376,7 +387,7 @@
   function clearWrong(r, c) { const el = board.cellEl(r, c); if (el) el.classList.remove('wrong'); }
   function scheduleMistakeCheck() {
     clearTimeout(mistakeTimer);
-    if (settings.mistakes === 'idle' && game && !game.solved) mistakeTimer = setTimeout(showMistakes, 3000);
+    if (settings.mistakes === 'idle' && game && !game.solved) mistakeTimer = setTimeout(showMistakes, (+settings.mistakeDelay || 10) * 1000);
   }
   function applyMistakeSetting() {
     $('btn-check').hidden = settings.mistakes !== 'manual';
@@ -535,6 +546,9 @@
     if (h.kind === 'step' && h.level >= 3) {
       h.cells.forEach(({ r, c, v }) => board.cellEl(r, c).classList.add('hint-cell', v === FILLED ? 'hint-f' : 'hint-x'));
     }
+    // on a big, scrolled board, bring the hinted area into view
+    const target = (f && f.cell) || (h.cells && h.cells[0]) || (h.wrong && h.wrong[0]);
+    if (target) board.reveal(target.r, target.c);
     if ($('hint-panel').getBoundingClientRect().top > window.innerHeight) {
       $('hint-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
@@ -562,11 +576,19 @@
     onStrokeStart: edStrokeStart,
     onStrokeEnd: () => {},
     crosshair: () => settings.crosshair,
+    zoomBar: $('zoom-editor'),
   });
   let ed = { w: 10, h: 10, grid: null, editingId: null, checked: null };
+  let fixRun = 0;
 
   function edClues() {
     return S.cluesFromSolution(ed.grid.map(r => r.map(v => (v ? FILLED : EMPTY))));
+  }
+  /** Update the clues of one row and one column after a square changed. */
+  function edLineClues(r, c) {
+    const toLine = arr => arr.map(v => (v ? FILLED : EMPTY));
+    edBoard.setLineClue('row', r, S.cluesFromLine(toLine(ed.grid[r])));
+    edBoard.setLineClue('col', c, S.cluesFromLine(toLine(ed.grid.map(row => row[c]))));
   }
   function edRender(rebuild) {
     const clues = edClues();
@@ -576,9 +598,10 @@
   }
   function edDirty() {
     ed.checked = null;
+    fixRun++; // stops a running auto-fix
     $('ed-save').disabled = true;
     $('ed-result').hidden = true;
-    edBoard.clearClass('alt-diff', 'stuck');
+    edBoard.clearClass('alt-diff', 'stuck', 'fixed');
   }
   function edStrokeStart(r, c, button) {
     const target = button === 2 ? 0 : (ed.grid[r][c] ? 0 : 1);
@@ -587,7 +610,7 @@
         if (ed.grid[rr][cc] === target) return;
         ed.grid[rr][cc] = target;
         edBoard.setCell(rr, cc, target ? FILLED : UNKNOWN);
-        edBoard.setClues(edClues());
+        edLineClues(rr, cc);
         edDirty();
       },
     };
@@ -608,8 +631,8 @@
   }
 
   $('ed-resize').onclick = () => {
-    const w = Math.max(3, Math.min(25, +$('ed-w').value || 10));
-    const h = Math.max(3, Math.min(25, +$('ed-h').value || 10));
+    const w = Math.max(3, Math.min(MAX_SIZE, +$('ed-w').value || 10));
+    const h = Math.max(3, Math.min(MAX_SIZE, +$('ed-h').value || 10));
     $('ed-w').value = w; $('ed-h').value = h;
     ed.grid = Array.from({ length: h }, (_, r) => Array.from({ length: w }, (_, c) => (ed.grid[r] && ed.grid[r][c]) || 0));
     ed.w = w; ed.h = h;
@@ -618,7 +641,7 @@
   $('ed-clear').onclick = () => { ed.grid = ed.grid.map(r => r.map(() => 0)); edRender(false); edDirty(); };
   $('ed-invert').onclick = () => { ed.grid = ed.grid.map(r => r.map(v => (v ? 0 : 1))); edRender(false); edDirty(); };
 
-  $('ed-check').onclick = () => {
+  function runCheck() {
     const res = $('ed-result');
     edBoard.clearClass('alt-diff', 'stuck');
     if (!ed.grid.some(r => r.some(Boolean))) {
@@ -628,31 +651,61 @@
     }
     const ev = S.evaluatePuzzle(ed.grid);
     res.hidden = false;
-    if (!ev.unique) {
+    const fixBtn = '<br><button type="button" class="small primary" id="ed-autofix">Auto-fix</button>' +
+      '<span class="muted small-text">changes as few squares as possible</span>';
+    if (!ev.unique && ev.altSolution) {
       res.className = 'ed-result bad';
-      res.innerHTML = '<b>More than one solution.</b> The squares outlined in red could also be drawn differently and still match the clues. Change the picture around them.';
+      res.innerHTML = '<b>More than one solution.</b> The squares outlined in red could also be drawn differently and still match the clues. Change the picture around them.' + fixBtn;
       if (ev.altSolution) ev.altSolution.forEach((row, r) => row.forEach((v, c) => {
         if ((v === FILLED) !== !!ed.grid[r][c]) edBoard.cellEl(r, c).classList.add('alt-diff');
       }));
+      $('ed-autofix').onclick = autoFix;
     } else if (!ev.logical) {
       res.className = 'ed-result bad';
-      res.innerHTML = '<b>Needs guessing.</b> The puzzle has one solution, but the hint techniques get stuck on the highlighted squares. Adjust the picture there.';
+      res.innerHTML = '<b>Needs guessing.</b> ' + (ev.unique ? 'The puzzle has one solution, but the' : 'The') +
+        ' hint techniques get stuck on the highlighted squares. Adjust the picture there.' +
+        (S.isBig(ed.h, ed.w) ? ' Puzzles larger than 30×30 must be solvable with line techniques alone (no Contradiction steps), so hints stay quick.' : '') + fixBtn;
       const ls = S.logicalSolve(ev.clues, ed.h, ed.w);
       ls.grid.forEach((row, r) => row.forEach((v, c) => { if (v === UNKNOWN) edBoard.cellEl(r, c).classList.add('stuck'); }));
+      $('ed-autofix').onclick = autoFix;
     } else {
       res.className = 'ed-result good';
-      res.innerHTML = `<b>✓ Good puzzle.</b> One solution, solvable without guessing. Difficulty: <b>${ev.difficulty}</b>.`;
+      res.innerHTML = `<b>✓ Good puzzle.</b> One solution, solvable without guessing. Difficulty: <b>${ev.difficulty}</b>.` + qualityHtml();
       ed.checked = ev;
     }
     $('ed-save').disabled = !ed.checked;
+  }
+  /** Advice on how interesting the puzzle is to solve (shown once it is valid; never blocks saving). */
+  function qualityHtml() {
+    const Q = window.NonogramQuality;
+    const rows = window.NonogramPuzzles.trimRows(ed.grid.map(r => r.map(v => (v ? '#' : '.')).join('')));
+    const a = Q.assess(window.NonogramPuzzles.toMatrix(rows));
+    const esc = s => String(s).replace(/[&<>]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]));
+    const items = a.checks.map(c =>
+      `<li class="${c.ok ? 'q-ok' : 'q-bad'}">${c.ok ? '✓' : '!'} ${esc(c.label)}: <b>${esc(c.shown)}</b> <span class="muted">(${esc(c.target)})</span>` +
+      (c.ok ? '' : `<br><span class="q-advice">${esc(c.advice)}</span>`) + '</li>').join('');
+    const head = a.warmUp
+      ? 'Small puzzles are warm-ups, so these are just for information:'
+      : a.passed === a.total ? 'It should also be interesting to solve:' : `Interest: ${a.passed} of ${a.total} targets met. You can still save it, but consider:`;
+    return `<div class="quality"><b>Puzzle quality.</b> ${head}<ul>${items}</ul></div>`;
+  }
+
+  $('ed-check').onclick = () => {
+    if (!S.isBig(ed.h, ed.w)) { runCheck(); return; }
+    // big puzzles take a moment: show that something is happening first
+    const res = $('ed-result');
+    res.className = 'ed-result'; res.hidden = false; res.textContent = 'Checking…';
+    $('ed-check').disabled = true;
+    setTimeout(() => { try { runCheck(); } finally { $('ed-check').disabled = false; } }, 30);
   };
 
   $('ed-save').onclick = () => {
     if (!ed.checked) return;
     const name = $('ed-name').value.trim() || 'My puzzle';
-    const rows = ed.grid.map(r => r.map(v => (v ? '#' : '.')).join(''));
+    // empty rows and columns at the edges are dropped: they only make the puzzle bigger
+    const rows = window.NonogramPuzzles.trimRows(ed.grid.map(r => r.map(v => (v ? '#' : '.')).join('')));
     const id = ed.editingId || 'c-' + Date.now().toString(36);
-    const entry = { id, name, rows };
+    const entry = { id, name, rows, difficulty: ed.checked.difficulty };
     const i = customPuzzles.findIndex(p => p.id === id);
     if (i >= 0) customPuzzles[i] = entry; else customPuzzles.push(entry);
     delete progress[id];
@@ -673,7 +726,7 @@
     const m = /^NONO1\.(\d+)x(\d+)\.([0-9a-f]+)\.?(.*)$/i.exec(code.trim());
     if (!m) throw new Error('That doesn’t look like a puzzle code.');
     const w = +m[1], h = +m[2];
-    if (w < 3 || h < 3 || w > 25 || h > 25) throw new Error('Puzzle size must be between 3 and 25.');
+    if (w < 3 || h < 3 || w > MAX_SIZE || h > MAX_SIZE) throw new Error(`Puzzle size must be between 3 and ${MAX_SIZE}.`);
     const bits = [];
     for (const ch of m[3]) { const n = parseInt(ch, 16); bits.push((n >> 3) & 1, (n >> 2) & 1, (n >> 1) & 1, n & 1); }
     if (bits.length < w * h) throw new Error('The code is incomplete.');
@@ -722,6 +775,173 @@
     }
   };
 
+  // ----- auto-fix ------------------------------------------------------------
+  async function autoFix() {
+    const run = ++fixRun;
+    const before = ed.grid.map(r => r.slice());
+    const avoid = new Set();
+    const changed = [];
+    edBoard.clearClass('alt-diff', 'stuck');
+    const res = $('ed-result');
+    res.className = 'ed-result';
+    res.innerHTML = '<b>Auto-fixing…</b> <span id="fix-status">looking for the squares to change</span>' +
+      '<progress id="fix-prog" max="1" value="0"></progress>' +
+      '<button type="button" class="small" id="fix-stop">Stop</button>';
+    let stop = false;
+    $('fix-stop').onclick = () => { stop = true; };
+    $('ed-check').disabled = true;
+    let firstStuck = null;
+    try {
+      for (let step = 0; step < Math.max(200, Math.round(ed.w * ed.h / 20)) && !stop; step++) {
+        await new Promise(r => setTimeout(r, 0)); // let the page update between steps
+        if (run !== fixRun) return;                // the drawing was edited meanwhile
+        const s = S.repairStep(ed.grid, avoid, 60);
+        if (s.solved || s.r < 0) break;
+        if (firstStuck == null) firstStuck = s.stuck;
+        ed.grid[s.r][s.c] ^= 1;
+        avoid.add(s.r + ',' + s.c);
+        changed.push([s.r, s.c]);
+        edBoard.setCell(s.r, s.c, ed.grid[s.r][s.c] ? FILLED : UNKNOWN);
+        edBoard.cellEl(s.r, s.c).classList.add('fixed');
+        edLineClues(s.r, s.c);
+        $('fix-status').textContent = `${changed.length} square${changed.length === 1 ? '' : 's'} changed, ${s.stuck} still uncertain`;
+        $('fix-prog').value = Math.max(0, 1 - s.stuck / firstStuck);
+      }
+    } finally {
+      $('ed-check').disabled = false;
+    }
+    if (run !== fixRun) return;
+    runCheck();
+    // ed-check doesn't clear .fixed, so the changed squares stay outlined
+    changed.forEach(([r, c]) => edBoard.cellEl(r, c).classList.add('fixed'));
+    if (!changed.length) return;
+    const note = document.createElement('div');
+    note.className = 'small-text';
+    note.innerHTML = `<br>Auto-fix changed <b>${changed.length}</b> square${changed.length === 1 ? '' : 's'} (outlined in blue). ` +
+      '<button type="button" class="small" id="fix-undo">Undo auto-fix</button>';
+    res.appendChild(note);
+    $('fix-undo').onclick = () => {
+      ed.grid = before;
+      edRender(false); edDirty();
+      runCheck();
+    };
+  }
+
+  // ----- picture import ------------------------------------------------------
+  const IMG = window.NonogramImage;
+  let imgState = null;
+  const clampSize = v => Math.max(3, Math.min(MAX_SIZE, Math.round(+v) || 3));
+
+  function imgAspect() {
+    const crop = $('img-trim').checked ? imgState.trimmed : imgState.full;
+    return crop.h / crop.w;
+  }
+  function imgFitSize(changed) {
+    if (!$('img-keep').checked) return;
+    const a = imgAspect();
+    if (changed === 'h') $('img-w').value = clampSize(+$('img-h').value / a);
+    else $('img-h').value = clampSize(+$('img-w').value * a);
+  }
+  function imgUpdate(resample, autoThreshold) {
+    const st = imgState;
+    const w = clampSize($('img-w').value), h = clampSize($('img-h').value);
+    if (resample || !st.dark || st.dark.length !== h || st.dark[0].length !== w) {
+      st.crop = $('img-trim').checked ? st.trimmed : st.full;
+      st.dark = IMG.sampleGrid(st.img, st.crop, w, h);
+    }
+    if (autoThreshold) $('img-threshold').value = Math.round(IMG.otsu(st.dark.flat()) * 100);
+    st.grid = IMG.toGrid(st.dark, +$('img-threshold').value / 100, $('img-invert').checked, $('img-clean').checked);
+    // preview
+    const cv = $('img-preview');
+    const px = Math.max(4, Math.floor(240 / Math.max(w, h)));
+    cv.width = w * px; cv.height = h * px;
+    const ctx = cv.getContext('2d');
+    const css = getComputedStyle(document.documentElement);
+    ctx.fillStyle = css.getPropertyValue('--cell-bg').trim() || '#fff';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.fillStyle = css.getPropertyValue('--filled').trim() || '#000';
+    let filled = 0;
+    st.grid.forEach((row, r) => row.forEach((v, c) => { if (v) { filled++; ctx.fillRect(c * px, r * px, px, px); } }));
+    $('img-info').textContent = `Puzzle: ${w}×${h}, ${Math.round(100 * filled / (w * h))}% filled`;
+  }
+
+  function nameFromFile(file) {
+    const base = ((file && file.name) || '').replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
+    if (!base || /^image$/i.test(base)) return 'My picture';
+    return (base.charAt(0).toUpperCase() + base.slice(1)).slice(0, 40);
+  }
+
+  async function openImageImport(file) {
+    let loaded;
+    try { loaded = await IMG.loadImage(file); } catch (err) { toast(err.message); return; }
+    const { img, url } = loaded;
+    const full = { x: 0, y: 0, w: img.naturalWidth, h: img.naturalHeight };
+    imgState = { img, url, full, trimmed: IMG.trimBounds(img), dark: null };
+    $('img-orig').src = url;
+    $('img-invert').checked = false;
+    // biggest side 20 squares, the other in proportion
+    const a = imgAspect();
+    if (a <= 1) { $('img-w').value = 20; $('img-h').value = clampSize(20 * a); }
+    else { $('img-h').value = 20; $('img-w').value = clampSize(20 / a); }
+    imgUpdate(true, true);
+    const dlg = $('dlg-image');
+    dlg.returnValue = '';
+    dlg.onclose = () => {
+      URL.revokeObjectURL(url);
+      if (dlg.returnValue !== 'ok') { imgState = null; return; }
+      const grid = imgState.grid.map(r => r.slice());
+      imgState = null;
+      ed = { w: grid[0].length, h: grid.length, grid, editingId: null, checked: null };
+      $('ed-name').value = nameFromFile(file);
+      $('ed-w').value = ed.w; $('ed-h').value = ed.h;
+      if (currentView !== 'editor') show('editor');
+      edRender(true); edDirty();
+      $('ed-check').onclick();
+    };
+    dlg.showModal();
+  }
+
+  $('img-w').addEventListener('input', () => { imgFitSize('w'); imgUpdate(false, false); });
+  $('img-h').addEventListener('input', () => { imgFitSize('h'); imgUpdate(false, false); });
+  $('img-keep').addEventListener('change', () => { imgFitSize('w'); imgUpdate(false, false); });
+  $('img-trim').addEventListener('change', () => { imgFitSize('w'); imgUpdate(true, false); });
+  $('img-threshold').addEventListener('input', () => imgUpdate(false, false));
+  $('img-invert').addEventListener('change', () => imgUpdate(false, false));
+  $('img-clean').addEventListener('change', () => imgUpdate(false, false));
+
+  $('ed-image').onclick = () => $('ed-image-file').click();
+  $('ed-image-file').onchange = e => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (f) openImageImport(f);
+  };
+  // drop a picture on the editor
+  const edView = $('view-editor');
+  edView.addEventListener('dragover', e => {
+    if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes('Files')) return;
+    e.preventDefault();
+    $('editor-wrap').classList.add('editor-drop');
+  });
+  edView.addEventListener('dragleave', e => {
+    if (!edView.contains(e.relatedTarget)) $('editor-wrap').classList.remove('editor-drop');
+  });
+  edView.addEventListener('drop', e => {
+    $('editor-wrap').classList.remove('editor-drop');
+    const f = e.dataTransfer && Array.from(e.dataTransfer.files || []).find(x => /^image\//.test(x.type));
+    if (!f) return;
+    e.preventDefault();
+    openImageImport(f);
+  });
+  // paste a picture (Ctrl+V) while in the editor
+  document.addEventListener('paste', e => {
+    if (currentView !== 'editor' || document.querySelector('dialog[open]')) return;
+    if (e.target.closest && e.target.closest('input, textarea')) return;
+    const item = Array.from((e.clipboardData && e.clipboardData.items) || []).find(i => /^image\//.test(i.type));
+    if (!item) return;
+    e.preventDefault();
+    openImageImport(item.getAsFile());
+  });
+
   // ===========================================================================
   // Settings
   // ===========================================================================
@@ -729,11 +949,19 @@
     document.querySelectorAll('input[name="mistakes"]').forEach(i => { i.checked = i.value === settings.mistakes; });
     $('set-crosshair').checked = settings.crosshair;
     $('set-greyclues').checked = settings.greyClues;
+    $('set-delay').value = String(settings.mistakeDelay || 10);
     $('dlg-settings').showModal();
   };
   document.querySelectorAll('input[name="mistakes"]').forEach(i => i.addEventListener('change', () => {
     settings.mistakes = i.value; store(KEY.settings, settings); applyMistakeSetting();
   }));
+  $('set-delay').onchange = e => {
+    settings.mistakeDelay = +e.target.value;
+    // picking a delay means "show mistakes after a pause"
+    settings.mistakes = 'idle';
+    document.querySelectorAll('input[name="mistakes"]').forEach(i => { i.checked = i.value === 'idle'; });
+    store(KEY.settings, settings); applyMistakeSetting();
+  };
   $('set-crosshair').onchange = e => { settings.crosshair = e.target.checked; store(KEY.settings, settings); };
   $('set-greyclues').onchange = e => {
     settings.greyClues = e.target.checked; store(KEY.settings, settings);
@@ -773,6 +1001,20 @@
   // ===========================================================================
   // Start
   // ===========================================================================
+  // A puzzle's size can change (empty edge rows and columns are now trimmed).
+  // Saved marks for the old size no longer line up, so drop them; keep solved times.
+  (function fixProgressSizes() {
+    let changed = false;
+    for (const p of allPuzzles()) {
+      const pr = progress[p.id];
+      if (!pr || typeof pr.g !== 'string' || pr.g.length === p.width * p.height) continue;
+      if (pr.solved) pr.g = encodeGrid(p.solution.map(r => r.map(v => (v ? FILLED : EMPTY))));
+      else delete progress[p.id];
+      changed = true;
+    }
+    if (changed) store(KEY.progress, progress);
+  })();
+
   updateButtons();
   show('library');
 

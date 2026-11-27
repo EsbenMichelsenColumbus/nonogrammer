@@ -136,7 +136,15 @@ main { max-width: 1200px; margin: 0 auto; padding: 16px; }
 .game-title h2 { font-size: 20px; }
 .timer { font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 600; padding: 4px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
 .game-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; }
-.board-wrap { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; box-shadow: var(--shadow); overflow: auto; display: flex; justify-content: center; }
+.board-col { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.zoom-bar { display: flex; justify-content: flex-end; gap: 4px; }
+.zoom-bar button { min-width: 36px; }
+.board-wrap {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 0; box-shadow: var(--shadow);
+  overflow: auto; max-height: calc(100vh - 150px); overscroll-behavior: contain;
+}
+.board-wrap .board { margin: 0 auto; padding: 14px; }
+/* the padding sits on the board, not the scroll box, so the sticky clue headers line up with its edge */
 .side { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 72px; }
 .tip { font-size: 13px; margin: -4px 0 0; }
 .tip-touch { display: none; }
@@ -157,7 +165,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 16px; }
 @media (max-width: 860px) {
   .game-layout { grid-template-columns: 1fr; }
   .side { position: static; }
-  .board-wrap { padding: 8px; }
+  .board-wrap { max-height: 75vh; }
+  .board-wrap .board { padding: 8px; }
   main { padding: 12px 16px; }
 }
 
@@ -167,22 +176,29 @@ main { max-width: 1200px; margin: 0 auto; padding: 16px; }
   grid-template-columns: auto repeat(var(--w), var(--cell));
   user-select: none; -webkit-user-select: none;
   touch-action: none;
-  font-size: max(9px, calc(var(--cell) * 0.5));
+  font-size: max(8px, calc(var(--cell) * 0.5));
   width: max-content;
 }
-.corner { }
+/* clue headers stay visible while a big board scrolls */
+.corner { position: sticky; top: 0; left: 0; z-index: 4; background: var(--panel); }
 .clue {
   color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums;
   display: flex; gap: 0;
   transition: color .15s, background .15s;
+  background-color: var(--panel);
 }
+.clue.col { position: sticky; top: 0; z-index: 3; }
+.clue.row { position: sticky; left: 0; z-index: 2; }
+.board.big .clue.col { line-height: 1.05; padding-bottom: 2px; }
+.board.big .clue.row { padding-right: 3px; }
 .clue.col { flex-direction: column; justify-content: flex-end; align-items: center; padding-bottom: 4px; line-height: 1.15; }
 .clue.row { justify-content: flex-end; align-items: center; padding-right: 6px; gap: calc(var(--cell) * 0.28); white-space: nowrap; }
 .clue.col.b5 { border-right: 2px solid transparent; }
-.clue.done { color: var(--done-clue); }
+.clue span { transition: color .15s; }
+.clue span.done { color: var(--done-clue); }
 .clue.cross, .cell.cross { background: var(--cell-hover); }
-.clue.col.alt { background: color-mix(in srgb, var(--cross) 45%, transparent); }
-.clue.row.alt { background: color-mix(in srgb, var(--cross) 45%, transparent); }
+.clue.col.alt { background: color-mix(in srgb, var(--cross) 45%, var(--panel)); }
+.clue.row.alt { background: color-mix(in srgb, var(--cross) 45%, var(--panel)); }
 .clue.hint-line { background: var(--hint-soft); color: var(--ink); box-shadow: inset 0 0 0 2px var(--hint); border-radius: 4px; }
 
 .cell {
@@ -220,6 +236,15 @@ main { max-width: 1200px; margin: 0 auto; padding: 16px; }
 .board.solved .cell { border-color: transparent; }
 .board.solved .cell.x::before, .board.solved .cell.x::after { display: none; }
 .board.solved .cell.f::after { inset: 0; border-radius: 0; }
+/* very small squares (zoomed-out big boards): solid fills and a dot for "empty" so the picture reads */
+.board.tiny .cell.f::after { inset: 0; border-radius: 0; }
+.board.tiny .cell.x::after { display: none; }
+.board.tiny .cell.x::before { transform: none; left: 35%; top: 35%; width: 30%; height: 30%; border-radius: 50%; }
+.board.tiny .cell.hint-cell { box-shadow: inset 0 0 0 1px var(--hint); }
+/* clue text follows the square size, so rows stay as tall as their squares (zoom in to read) */
+.board.tiny { font-size: var(--cell); }
+.board.tiny .clue { line-height: 1; }
+.board.tiny .clue.row { height: var(--cell); gap: 2px; }
 .board.solved .clue { color: var(--done-clue); }
 
 /* editor marks */
@@ -268,10 +293,31 @@ dialog::backdrop { background: rgba(0,0,0,.35); }
 dialog h2 { font-size: 19px; margin-bottom: 12px; }
 fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; padding: 8px 12px 10px; }
 legend { font-weight: 600; padding: 0 4px; }
-fieldset label { display: flex; gap: 8px; align-items: center; padding: 4px 0; }
+fieldset label { display: flex; gap: 8px; align-items: center; padding: 4px 0; flex-wrap: wrap; }
+fieldset select { font: inherit; color: var(--ink); background: var(--cell-bg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
 .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
 .dlg-actions .danger { margin-right: auto; }
 textarea { width: 100%; font: 13px/1.4 ui-monospace, Consolas, monospace; color: var(--ink); background: var(--cell-bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; resize: vertical; }
+/* picture import */
+#dlg-image { max-width: min(560px, calc(100vw - 32px)); }
+.img-dlg { display: flex; flex-direction: column; gap: 10px; }
+.img-dlg h2 { margin-bottom: 2px; }
+.img-panes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.img-panes figure { margin: 0; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.img-panes figcaption { font-size: 13px; color: var(--muted); text-align: center; }
+.img-frame {
+  aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+  background: var(--cross); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; padding: 6px;
+}
+.img-frame img, .img-frame canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
+.img-frame canvas { image-rendering: pixelated; }
+.img-dlg input[type="range"] { width: 100%; accent-color: var(--accent); padding: 0; border: 0; background: none; }
+.check { display: flex; gap: 8px; align-items: center; font-size: 14px; }
+.editor-drop { outline: 3px dashed var(--hint); outline-offset: -3px; border-radius: 12px; }
+.cell.fixed { outline: 2px solid var(--accent); outline-offset: -2px; z-index: 1; }
+.ed-result .small { margin-top: 8px; margin-right: 6px; }
+.ed-result progress { width: 100%; margin-top: 6px; }
+
 .win { text-align: center; min-width: 260px; }
 .win canvas { width: 160px; height: 160px; image-rendering: pixelated; border-radius: 8px; margin-bottom: 8px; background: var(--cross); }
 .win .dlg-actions { justify-content: center; }
@@ -282,3 +328,9 @@ textarea { width: 100%; font: 13px/1.4 ui-monospace, Consolas, monospace; color:
   background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 99px; box-shadow: var(--shadow);
   z-index: 20; font-weight: 500; max-width: calc(100vw - 32px);
 }
+
+/* puzzle quality advice in the editor */
+.quality { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 13px; }
+.quality ul { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.quality .q-bad { font-weight: 500; }
+.quality .q-advice { color: var(--muted); font-weight: 400; display: inline-block; margin-left: 14px; }
