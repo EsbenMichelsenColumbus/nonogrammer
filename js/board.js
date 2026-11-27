@@ -129,7 +129,8 @@
     let manualSize = null; // null = fit to the screen
     let cellSize = 28;
 
-    function fitSize() {
+    /** Square size that fits the frame. `whole`: allow small squares so the whole board shows. */
+    function fitSize(whole) {
       const maxRow = Math.max(1, ...clues.rows.map(l => l.length || 1));
       const maxCol = Math.max(1, ...clues.cols.map(l => l.length || 1));
       const style = getComputedStyle(wrap);
@@ -143,7 +144,7 @@
         size = Math.min(size, availH / (h + maxCol * 0.62 + 0.3));
       }
       // small puzzles stay finger-sized (the page scrolls instead); big ones may shrink further
-      const min = Math.max(h, w) > 30 ? 6 : 14;
+      const min = whole || Math.max(h, w) > 30 ? 6 : 14;
       return Math.max(min, Math.min(36, Math.floor(size)));
     }
 
@@ -180,7 +181,8 @@
 
     function zoom(dir, anchor) {
       if (!h) return;
-      if (dir === 'fit') { manualSize = null; applySize(fitSize()); return; }
+      // the Fit button shows the whole board, even if the squares get small
+      if (dir === 'fit') { manualSize = fitSize(true); applySize(manualSize); return; }
       const next = dir > 0 ? ZOOM_STEPS.find(s => s > cellSize) : [...ZOOM_STEPS].reverse().find(s => s < cellSize);
       if (next == null) return;
       manualSize = next;
@@ -213,9 +215,56 @@
 
     el.addEventListener('contextmenu', e => e.preventDefault());
 
+    // ----- touch: one finger draws, two fingers pan and pinch-zoom
+    const touches = new Map(); // pointerId -> {x, y}
+    let gesture = null;
+    const midDist = () => {
+      const [a, b] = [...touches.values()];
+      return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y) || 1 };
+    };
+    function startGesture() {
+      // a second finger: undo what the first finger just drew and switch to pan/zoom
+      if (stroke) {
+        const s = stroke;
+        stroke = null;
+        if (s.impl.cancel) s.impl.cancel(); else opts.onStrokeEnd(s.impl);
+      }
+      const m = midDist();
+      gesture = { x: m.x, y: m.y, d: m.d, size: cellSize, raf: 0 };
+    }
+    function moveGesture() {
+      if (gesture.raf) return;
+      gesture.raf = requestAnimationFrame(() => {
+        gesture.raf = 0;
+        if (!gesture || touches.size < 2) return;
+        const m = midDist();
+        wrap.scrollLeft -= m.x - gesture.x;
+        wrap.scrollTop -= m.y - gesture.y;
+        gesture.x = m.x; gesture.y = m.y;
+        const size = Math.round(Math.max(ZOOM_STEPS[0], Math.min(ZOOM_STEPS[ZOOM_STEPS.length - 1], gesture.size * m.d / gesture.d)));
+        if (size !== cellSize) { manualSize = size; applySize(size, m); }
+      });
+    }
+    el.addEventListener('pointerdown', e => {
+      if (e.pointerType !== 'touch') return;
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      try { el.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+      if (touches.size === 2) startGesture();
+    }, true);
+    el.addEventListener('pointermove', e => {
+      if (!touches.has(e.pointerId)) return;
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (gesture) moveGesture();
+    }, true);
+    const touchUp = e => {
+      if (!touches.delete(e.pointerId)) return;
+      if (gesture && touches.size === 0) gesture = null;
+    };
+    ['pointerup', 'pointercancel'].forEach(t => el.addEventListener(t, touchUp, true));
+
     el.addEventListener('pointerdown', e => {
       const d = e.target.closest('.cell');
-      if (!d || stroke) return;
+      if (!d || stroke || gesture) return;
       if (e.button !== 0 && e.button !== 2) return;
       e.preventDefault();
       const r = +d.dataset.r, c = +d.dataset.c;
@@ -227,6 +276,7 @@
     });
 
     el.addEventListener('pointermove', e => {
+      if (gesture) return;
       if (stroke && e.pointerId === stroke.pointerId) {
         const p = cellFromPoint(e.clientX, e.clientY);
         if (!p) return;

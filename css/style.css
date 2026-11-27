@@ -73,6 +73,7 @@ button {
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
   padding: 7px 12px; min-height: 36px;
 }
+button { touch-action: manipulation; }
 button:hover:not(:disabled) { border-color: var(--line-strong); }
 button:disabled { opacity: .45; cursor: not-allowed; }
 button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -148,7 +149,11 @@ main { max-width: 1200px; margin: 0 auto; padding: 16px; }
 .side { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 72px; }
 .tip { font-size: 13px; margin: -4px 0 0; }
 .tip-touch { display: none; }
-@media (pointer: coarse) { .tip-touch { display: inline; } .tip-mouse { display: none; } }
+@media (pointer: coarse) {
+  .tip-touch { display: inline; } .tip-mouse { display: none; }
+  /* iPhones zoom the page when a field with text under 16px gets focus */
+  input[type=text], input[type=number], input:not([type]), select, textarea { font-size: 16px; }
+}
 .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .hint-btn { font-size: 16px; min-height: 44px; }
 .tool-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
@@ -175,7 +180,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 16px; }
   display: grid;
   grid-template-columns: auto repeat(var(--w), var(--cell));
   user-select: none; -webkit-user-select: none;
-  touch-action: none;
+  touch-action: pan-x pan-y; /* drag on the clues to scroll */
   font-size: max(8px, calc(var(--cell) * 0.5));
   width: max-content;
 }
@@ -202,6 +207,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 16px; }
 .clue.hint-line { background: var(--hint-soft); color: var(--ink); box-shadow: inset 0 0 0 2px var(--hint); border-radius: 4px; }
 
 .cell {
+  touch-action: none; /* one finger draws; two fingers pan and zoom (board.js) */
   width: var(--cell); height: var(--cell);
   background: var(--cell-bg);
   border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
