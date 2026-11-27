@@ -60,6 +60,23 @@
   techTest('constrained-overlap', [4], '..x.......', '..x...#...');
   techTest('unreachable', [2], '...#......', 'xx.#.xxxxx');
 
+  // Empty rows and columns at the edges are trimmed
+  (function () {
+    const T = NonogramPuzzles.trimRows;
+    const t1 = T(['.....', '..#..', '.#.#.', '.....', '.....']).join('/');
+    check('trim: empty edge rows and columns removed', t1 === '.#./#.#', t1);
+    const t2 = T(['#..', '...', '..#']).join('/');
+    check('trim: inner empty rows and columns are kept', t2 === '#../.../..#', t2);
+    const t3 = T(['...', '...']).join('/');
+    check('trim: an empty drawing is left alone', t3 === '.../...', t3);
+    const edges = NonogramPuzzles.PUZZLES.filter(p => {
+      const r = p.rows;
+      return !r[0].includes('#') || !r[r.length - 1].includes('#') ||
+        !r.some(x => x[0] === '#') || !r.some(x => x[x.length - 1] === '#');
+    }).map(p => p.id);
+    check('trim: no built-in puzzle has an empty edge row or column', !edges.length, edges.join(', '));
+  })();
+
   // Per-number clue dimming (judged from the player's marks only)
   function doneTest(clues, lineStr, expected) {
     const got = S.finishedBlocks(clues, parse(lineStr)).map(b => b ? 'D' : '-').join('');

@@ -400,16 +400,39 @@
     return rows.map(r => Array.from(r, ch => (ch === '#' ? 1 : 0)));
   }
 
+  /**
+   * Remove empty rows and columns at the edges ('#' filled, anything else empty).
+   * They carry no information (their clue is 0), so the puzzle only gets tidier.
+   * A drawing with nothing filled is returned unchanged.
+   */
+  function trimRows(rows) {
+    const filled = r => r.includes('#');
+    let top = 0, bottom = rows.length - 1;
+    while (top <= bottom && !filled(rows[top])) top++;
+    while (bottom >= top && !filled(rows[bottom])) bottom--;
+    if (top > bottom) return rows.slice();
+    const kept = rows.slice(top, bottom + 1);
+    const w = kept[0].length;
+    const colFilled = c => kept.some(r => r[c] === '#');
+    let left = 0, right = w - 1;
+    while (!colFilled(left)) left++;
+    while (!colFilled(right)) right--;
+    return kept.map(r => r.slice(left, right + 1));
+  }
+
   PUZZLES.forEach(p => {
     const w = p.rows[0].length;
     p.rows.forEach((r, i) => {
       if (r.length !== w) console.warn(`Puzzle ${p.id}: row ${i + 1} has length ${r.length}, expected ${w}`);
     });
-    p.width = w;
+    // the library groups puzzles by the size they were drawn at
+    p.group = `${w} × ${p.rows.length}`;
+    p.rows = trimRows(p.rows);
+    p.width = p.rows[0].length;
     p.height = p.rows.length;
     p.solution = toMatrix(p.rows);
     p.builtIn = true;
   });
 
-  global.NonogramPuzzles = { PUZZLES, toMatrix };
+  global.NonogramPuzzles = { PUZZLES, toMatrix, trimRows };
 })(typeof window !== 'undefined' ? window : globalThis);

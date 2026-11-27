@@ -39,7 +39,7 @@ If the board has a mistake, the hint points that out first, because no reasoning
 
 ## Create puzzles
 
-**Create** opens the editor. Draw, then press **Check puzzle**. The editor only allows saving when the puzzle has exactly one solution and can be solved with the techniques above, so hints always work. If it can't be saved, the editor highlights the problem: squares that could be drawn another way, or squares where logic gets stuck. **Copy code** and **Paste code** let you share puzzles.
+**Create** opens the editor. Draw, then press **Check puzzle**. The editor only allows saving when the puzzle has exactly one solution and can be solved with the techniques above, so hints always work. If it can't be saved, the editor highlights the problem: squares that could be drawn another way, or squares where logic gets stuck. **Copy code** and **Paste code** let you share puzzles. Empty rows and columns at the edges of a drawing are removed when you save, so the puzzle is only as big as the picture.
 
 Puzzles can be up to 100×100. Puzzles larger than 30×30 must be solvable with line techniques alone (no Contradiction steps): searching for contradictions on a board that size is too slow to do for every check and hint. Auto-fix aims for that automatically.
 

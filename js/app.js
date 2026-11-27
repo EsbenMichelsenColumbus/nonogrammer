@@ -37,8 +37,10 @@
   // ===========================================================================
   const evalCache = new Map();
   function prepareCustom(p) {
-    const solution = window.NonogramPuzzles.toMatrix(p.rows);
-    return { ...p, width: p.rows[0].length, height: p.rows.length, solution, builtIn: false };
+    // older saves may still have empty edge rows/columns: drop them like on save
+    const rows = window.NonogramPuzzles.trimRows(p.rows);
+    const solution = window.NonogramPuzzles.toMatrix(rows);
+    return { ...p, rows, width: rows[0].length, height: rows.length, solution, builtIn: false };
   }
   function allPuzzles() {
     return window.NonogramPuzzles.PUZZLES.concat(customPuzzles.map(prepareCustom));
@@ -131,7 +133,7 @@
     const builtIns = window.NonogramPuzzles.PUZZLES;
     const groups = new Map();
     builtIns.forEach((p, i) => {
-      const key = `${p.width} × ${p.height}`;
+      const key = p.group || `${p.width} × ${p.height}`;
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push({ p, i });
     });
@@ -685,7 +687,8 @@
   $('ed-save').onclick = () => {
     if (!ed.checked) return;
     const name = $('ed-name').value.trim() || 'My puzzle';
-    const rows = ed.grid.map(r => r.map(v => (v ? '#' : '.')).join(''));
+    // empty rows and columns at the edges are dropped: they only make the puzzle bigger
+    const rows = window.NonogramPuzzles.trimRows(ed.grid.map(r => r.map(v => (v ? '#' : '.')).join('')));
     const id = ed.editingId || 'c-' + Date.now().toString(36);
     const entry = { id, name, rows, difficulty: ed.checked.difficulty };
     const i = customPuzzles.findIndex(p => p.id === id);
@@ -983,6 +986,20 @@
   // ===========================================================================
   // Start
   // ===========================================================================
+  // A puzzle's size can change (empty edge rows and columns are now trimmed).
+  // Saved marks for the old size no longer line up, so drop them; keep solved times.
+  (function fixProgressSizes() {
+    let changed = false;
+    for (const p of allPuzzles()) {
+      const pr = progress[p.id];
+      if (!pr || typeof pr.g !== 'string' || pr.g.length === p.width * p.height) continue;
+      if (pr.solved) pr.g = encodeGrid(p.solution.map(r => r.map(v => (v ? FILLED : EMPTY))));
+      else delete progress[p.id];
+      changed = true;
+    }
+    if (changed) store(KEY.progress, progress);
+  })();
+
   updateButtons();
   show('library');
 
