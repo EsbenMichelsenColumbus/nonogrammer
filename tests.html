@@ -74,6 +74,22 @@
     }
   })();
 
+  // Difficulty curve: within each size group puzzles go from easier to harder, and every
+  // group of 10x10 and up has at least one Hard or Expert puzzle
+  (function () {
+    const LV = ['Easy', 'Medium', 'Hard', 'Expert'];
+    const groups = {};
+    for (const p of NonogramPuzzles.PUZZLES) (groups[p.group] = groups[p.group] || []).push(p);
+    for (const [g, list] of Object.entries(groups)) {
+      const levels = list.map(p => LV.indexOf(S.evaluatePuzzle(p.solution).difficulty));
+      const sorted = levels.every((v, i) => i === 0 || v >= levels[i - 1]);
+      check(`difficulty: ${g} goes from easier to harder`, sorted, list.map((p, i) => p.id + ':' + LV[levels[i]]).join(' '));
+      if (Math.max(...g.split(' × ').map(Number)) >= 10) {
+        check(`difficulty: ${g} has a Hard or Expert puzzle`, levels.some(v => v >= 2), levels.map(v => LV[v]).join(' '));
+      }
+    }
+  })();
+
   // Empty rows and columns at the edges are trimmed
   (function () {
     const T = NonogramPuzzles.trimRows;

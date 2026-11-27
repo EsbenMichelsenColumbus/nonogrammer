@@ -115,12 +115,29 @@
    * How far a drawing is from meeting the targets (0 = meets all of them).
    * Infinity if it is not a valid puzzle (no unique, guess-free solution).
    */
-  function shortfall(solution01) {
+  const LEVELS = ['Easy', 'Medium', 'Hard', 'Expert'];
+
+  /** How far a solve is from a difficulty target (0 = on target). */
+  function difficultyGap(target, ls, h, w) {
+    const now = LEVELS.indexOf(S.rateDifficulty(ls.maxLevel, ls.counts, h, w));
+    const want = LEVELS.indexOf(target);
+    if (now === want) return 0;
+    if (now > want) return 4 * (now - want);
+    const an = ls.counts['line-analysis'] || 0, co = ls.counts.contradiction || 0;
+    // a little slope inside a level, so the search can tell "closer" from "same"
+    let slope = 0;
+    if (target === 'Expert') slope = (3 - co) * 0.5;
+    else if (target === 'Hard' && Math.max(h, w) <= 10) slope = Math.max(0, 3 - an - 3 * co) * 0.5;
+    return 4 * (want - now) + slope;
+  }
+
+  function shortfall(solution01, targetDifficulty) {
     const h = solution01.length, w = solution01[0].length;
     const clues = S.cluesFromSolution(solution01.map(r => r.map(v => (v ? S.FILLED : S.EMPTY))));
-    if (!S.logicalSolve(clues, h, w).solved) return Infinity;
+    const ls = S.logicalSolve(clues, h, w);
+    if (!ls.solved) return Infinity;
     const a = assess(solution01);
-    let cost = 0;
+    let cost = targetDifficulty ? difficultyGap(targetDifficulty, ls, h, w) : 0;
     for (const c of a.checks) {
       if (c.ok) continue;
       cost += 1;
@@ -138,10 +155,11 @@
    * One tuning step: try changing single squares on the picture's outline (where a change
    * is least visible) and return the change that brings the puzzle closest to the targets
    * while keeping it valid, or null if no change helps. `avoid`: Set of "r,c" not to touch.
+   * `targetDifficulty` (optional): also steer towards this rating (Easy, Medium, Hard or Expert).
    */
-  function improveStep(solution01, avoid, maxCandidates) {
+  function improveStep(solution01, avoid, maxCandidates, targetDifficulty) {
     const h = solution01.length, w = solution01[0].length;
-    const base = shortfall(solution01);
+    const base = shortfall(solution01, targetDifficulty);
     if (base === 0) return { done: true, cost: 0 };
     const at = (r, c) => (r >= 0 && r < h && c >= 0 && c < w ? solution01[r][c] : 0);
     const outline = [];
@@ -156,12 +174,12 @@
     let best = null;
     for (const [r, c] of pick) {
       solution01[r][c] ^= 1;
-      const cost = shortfall(solution01);
+      const cost = shortfall(solution01, targetDifficulty);
       solution01[r][c] ^= 1;
       if (cost < base && (!best || cost < best.cost)) best = { r, c, cost };
     }
     return best ? { done: false, r: best.r, c: best.c, cost: best.cost, before: base } : null;
   }
 
-  global.NonogramQuality = { TARGETS, measure, assess, isWarmUp, shortfall, improveStep };
+  global.NonogramQuality = { TARGETS, LEVELS, measure, assess, isWarmUp, shortfall, improveStep };
 })(typeof window !== 'undefined' ? window : globalThis);

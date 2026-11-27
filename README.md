@@ -59,7 +59,7 @@ A valid puzzle is not automatically a fun one. After **Check puzzle**, the edito
 | Tricky moments | at least 5% of steps | Steps where only one or two lines can make progress, so you have to find them |
 | Techniques used | at least 6 | Variety in the reasoning needed |
 
-This is advice only: you can save a puzzle that misses targets. Puzzles under 10×10 are warm-ups and aren't judged. Every built-in puzzle of 10×10 and larger meets all targets, and `tests.html` checks this.
+This is advice only: you can save a puzzle that misses targets. Puzzles under 10×10 are warm-ups and aren't judged. Every built-in puzzle of 10×10 and larger meets all targets, and `tests.html` checks this. Within each size group the built-in puzzles go from easier to harder, and every group of 10×10 and up has at least one Hard or Expert puzzle (also checked by `tests.html`).
 
 ## Files
 
