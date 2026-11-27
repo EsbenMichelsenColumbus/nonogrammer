@@ -1,5 +1,7 @@
 # Nonograms
 
+![Nonograms: a half-solved lighthouse puzzle with a hint](assets/cover.png)
+
 A browser nonogram game whose hints teach you how to solve, instead of just revealing squares.
 
 ## Play
@@ -71,6 +73,7 @@ This is advice only: you can save a puzzle that misses targets. Puzzles under 10
 ```
 index.html        page
 favicon.svg       browser tab icon
+assets/cover.*    cover art and link preview (cover.html draws it; tools/make-cover.ps1 renders the PNG)
 .nojekyll         tells GitHub Pages to serve the files as they are
 css/style.css     styles (light and dark)
 js/solver.js      technique-based solver, uniqueness check, difficulty rating
