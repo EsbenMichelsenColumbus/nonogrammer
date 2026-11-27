@@ -19,6 +19,7 @@
 <pre id="summary"></pre>
 <script src="js/solver.js"></script>
 <script src="js/hints.js"></script>
+<script src="js/quality.js"></script>
 <script src="js/puzzles.js"></script>
 <script src="js/image-import.js"></script>
 <script>
@@ -59,6 +60,19 @@
   techTest('block-complete', [3, 1], '..###.....', '.x###x....');
   techTest('constrained-overlap', [4], '..x.......', '..x...#...');
   techTest('unreachable', [2], '...#......', 'xx.#.xxxxx');
+
+  // Quality: every built-in puzzle of 10x10 and up meets all interest targets
+  (function () {
+    const Q = NonogramQuality;
+    const sym = Q.measure(NonogramPuzzles.toMatrix(['#.#', '###', '#.#'])).symmetry;
+    check('quality: a mirror image measures 100% symmetric', sym === 1, sym);
+    for (const p of NonogramPuzzles.PUZZLES) {
+      const a = Q.assess(p.solution);
+      if (a.warmUp) continue;
+      const bad = a.checks.filter(c => !c.ok).map(c => `${c.label} ${c.shown} (${c.target})`);
+      check(`quality: ${p.id} meets all ${a.total} targets`, !bad.length, bad.join('; '));
+    }
+  })();
 
   // Empty rows and columns at the edges are trimmed
   (function () {

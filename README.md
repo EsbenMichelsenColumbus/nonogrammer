@@ -47,6 +47,20 @@ Puzzles can be up to 100×100. Puzzles larger than 30×30 must be solvable with 
 
 If a drawing has more than one solution or needs guessing, **Auto-fix** changes as few squares as possible until it solves without guessing. It outlines the changed squares in blue, and **Undo auto-fix** puts the drawing back.
 
+## Puzzle quality
+
+A valid puzzle is not automatically a fun one. After **Check puzzle**, the editor also shows how interesting the puzzle is to solve, measured against these targets:
+
+| Measure | Target | Why |
+|---|---|---|
+| Symmetry | at most 85% | Mirror-image pictures have mirror-image clues, so solving one half solves the other |
+| Filled squares | 30–60% | Big solid areas give large overlaps straight away |
+| Given away at the start | at most 40% | The share of squares you can work out from single lines on the empty board |
+| Tricky moments | at least 5% of steps | Steps where only one or two lines can make progress, so you have to find them |
+| Techniques used | at least 6 | Variety in the reasoning needed |
+
+This is advice only: you can save a puzzle that misses targets. Puzzles under 10×10 are warm-ups and aren't judged. Every built-in puzzle of 10×10 and larger meets all targets, and `tests.html` checks this.
+
 ## Files
 
 ```
@@ -54,6 +68,7 @@ index.html        page
 css/style.css     styles (light and dark)
 js/solver.js      technique-based solver, uniqueness check, difficulty rating
 js/hints.js       turns solver steps into explanations and diagrams
+js/quality.js     puzzle quality measures and targets
 js/puzzles.js     built-in puzzles ('#' filled, '.' empty)
 js/board.js       board rendering and drag input
 js/image-import.js picture to grid: sampling, threshold, clean-up
@@ -62,4 +77,4 @@ tests.html        solver tests + validation of every built-in puzzle
 tools/serve.ps1   optional local web server (used for automated testing)
 ```
 
-To add a built-in puzzle, add it to `js/puzzles.js`. Then open `tests.html` (through `tools/serve.ps1`, or directly in a browser) to confirm it is unique and needs no guessing.
+To add a built-in puzzle, add it to `js/puzzles.js`. Then open `tests.html` (through `tools/serve.ps1`, or directly in a browser) to confirm it is unique, needs no guessing and meets the quality targets.

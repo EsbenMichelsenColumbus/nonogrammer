@@ -670,11 +670,26 @@
       $('ed-autofix').onclick = autoFix;
     } else {
       res.className = 'ed-result good';
-      res.innerHTML = `<b>✓ Good puzzle.</b> One solution, solvable without guessing. Difficulty: <b>${ev.difficulty}</b>.`;
+      res.innerHTML = `<b>✓ Good puzzle.</b> One solution, solvable without guessing. Difficulty: <b>${ev.difficulty}</b>.` + qualityHtml();
       ed.checked = ev;
     }
     $('ed-save').disabled = !ed.checked;
   }
+  /** Advice on how interesting the puzzle is to solve (shown once it is valid; never blocks saving). */
+  function qualityHtml() {
+    const Q = window.NonogramQuality;
+    const rows = window.NonogramPuzzles.trimRows(ed.grid.map(r => r.map(v => (v ? '#' : '.')).join('')));
+    const a = Q.assess(window.NonogramPuzzles.toMatrix(rows));
+    const esc = s => String(s).replace(/[&<>]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]));
+    const items = a.checks.map(c =>
+      `<li class="${c.ok ? 'q-ok' : 'q-bad'}">${c.ok ? '✓' : '!'} ${esc(c.label)}: <b>${esc(c.shown)}</b> <span class="muted">(${esc(c.target)})</span>` +
+      (c.ok ? '' : `<br><span class="q-advice">${esc(c.advice)}</span>`) + '</li>').join('');
+    const head = a.warmUp
+      ? 'Small puzzles are warm-ups, so these are just for information:'
+      : a.passed === a.total ? 'It should also be interesting to solve:' : `Interest: ${a.passed} of ${a.total} targets met. You can still save it, but consider:`;
+    return `<div class="quality"><b>Puzzle quality.</b> ${head}<ul>${items}</ul></div>`;
+  }
+
   $('ed-check').onclick = () => {
     if (!S.isBig(ed.h, ed.w)) { runCheck(); return; }
     // big puzzles take a moment: show that something is happening first
